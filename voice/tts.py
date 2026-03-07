@@ -4,8 +4,9 @@ Falls back to a print stub if the API key is not set.
 Audio is played through the system default output (Bluetooth speaker).
 """
 import os
+import subprocess
 import sys
-import tempfile
+import time
 
 from dotenv import load_dotenv
 
@@ -41,18 +42,28 @@ def speak(text: str) -> None:
         return
 
     try:
+        t0 = time.monotonic()
+        # pcm_16000: raw signed-16-bit mono at 16 kHz — no MP3 decode overhead,
+        # smaller per-chunk size, plays directly via aplay.
         audio = client.text_to_speech.convert(
             voice_id=_VOICE_ID,
             text=text,
             model_id="eleven_turbo_v2_5",
-            output_format="mp3_44100_128",
+            output_format="pcm_16000",
         )
-        # Write to a temp file and play with aplay/mpg123 (works on Pi).
-        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
-            for chunk in audio:
-                f.write(chunk)
-            tmp_path = f.name
-        os.system(f"mpg123 -q {tmp_path}")
-        os.unlink(tmp_path)
+        # Stream raw PCM to aplay — starts playing as soon as first chunk arrives.
+        proc = subprocess.Popen(
+            ["aplay", "-q", "-f", "S16_LE", "-r", "16000", "-c", "1", "-"],
+            stdin=subprocess.PIPE,
+        )
+        first_chunk = True
+        for chunk in audio:
+            if first_chunk:
+                print(f"[Timing] TTS first-chunk: {time.monotonic()-t0:.2f}s")
+                first_chunk = False
+            proc.stdin.write(chunk)
+        proc.stdin.close()
+        proc.wait()
+        print(f"[Timing] TTS total (API+playback): {time.monotonic()-t0:.2f}s")
     except Exception as exc:
         print(f"[TTS] Error: {exc}", file=sys.stderr)

@@ -78,11 +78,26 @@ def transcribe(
             audio = nr.reduce_noise(y=audio, sr=VAD_SAMPLE_RATE)
         except Exception as exc:  # noqa: BLE001
             print(f"[Denoiser error] {exc}", file=sys.stderr)
+    t0 = time.monotonic()
     segments, info = model.transcribe(audio, task="transcribe", initial_prompt=WHISPER_PROMPT)
     text = "".join(seg.text for seg in segments).strip()
+    print(f"[Timing] Whisper ({len(audio)/VAD_SAMPLE_RATE:.1f}s audio): {time.monotonic()-t0:.2f}s")
     if text:
         print(f"[Whisper/{info.language}] {text}")
     return text
+
+
+def _drain_queue() -> None:
+    """Discard audio accumulated while the bot was thinking/speaking."""
+    discarded = 0
+    while not audio_queue.empty():
+        try:
+            audio_queue.get_nowait()
+            discarded += 1
+        except Exception:
+            break
+    if discarded:
+        print(f"[Audio] Drained {discarded} stale frames after speaking.")
 
 
 def listen_forever() -> None:
@@ -151,6 +166,7 @@ def listen_forever() -> None:
                         segment_duration = 0.0
                         if text:
                             engine.handle(text, now=last_speech_time)
+                            _drain_queue()
 
                 else:
                     if speech_frames:
@@ -160,6 +176,7 @@ def listen_forever() -> None:
                                 text = transcribe(model, speech_frames, native_sr)
                                 if text:
                                     engine.handle(text, now=last_speech_time)
+                                    _drain_queue()
                             speech_frames.clear()
                             segment_duration = 0.0
                             silence_duration = 0.0
