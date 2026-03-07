@@ -30,7 +30,7 @@ MAX_SILENCE_BETWEEN_SPEECH_SECONDS = 0.8
 USE_DENOISER = False
 
 # Whisper model size: "tiny" is fastest; "small" is more accurate for Finnish.
-WHISPER_MODEL="base"
+WHISPER_MODEL = "base"
 # Initial prompt biases Whisper toward Finnish and English vocabulary.
 WHISPER_PROMPT = (
     "Founderbot, hei botti, hello, moi, terve, kiitos, ole hyvä, "
@@ -111,6 +111,7 @@ def listen_forever() -> None:
     speech_frames: list[np.ndarray] = []
     segment_duration = 0.0
     silence_duration = 0.0
+    last_speech_time = time.monotonic()
 
     with sd.InputStream(
         samplerate=native_sr,
@@ -144,13 +145,14 @@ def listen_forever() -> None:
                     speech_frames.append(mono)  # store native-rate audio
                     segment_duration += frame_seconds
                     silence_duration = 0.0
+                    last_speech_time = time.monotonic()
 
                     if segment_duration >= MAX_SEGMENT_SECONDS:
                         text = transcribe(model, speech_frames, native_sr)
                         speech_frames.clear()
                         segment_duration = 0.0
                         if text:
-                            engine.handle(text, now=time.monotonic())
+                            engine.handle(text, now=last_speech_time)
 
                 else:
                     if speech_frames:
@@ -159,7 +161,7 @@ def listen_forever() -> None:
                             if segment_duration >= MIN_SEGMENT_SECONDS:
                                 text = transcribe(model, speech_frames, native_sr)
                                 if text:
-                                    engine.handle(text, now=time.monotonic())
+                                    engine.handle(text, now=last_speech_time)
                             speech_frames.clear()
                             segment_duration = 0.0
                             silence_duration = 0.0

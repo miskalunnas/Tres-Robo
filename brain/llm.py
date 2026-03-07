@@ -19,7 +19,7 @@ class Brain:
     def __init__(self) -> None:
         self._client = OpenAI(
             api_key=os.environ["MOONSHOT_API_KEY"],
-            base_url="https://api.moonshot.cn/v1",
+            base_url="https://api.moonshot.ai/v1",
         )
         self._history: list[dict] = []
         self._reset_history()

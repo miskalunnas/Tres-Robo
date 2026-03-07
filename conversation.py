@@ -23,7 +23,7 @@ WAKE_WORDS = [
     "hei robotti",
 ]
 GOODBYE_WORDS = ["goodbye", "bye", "näkemiin", "hei hei", "stop listening"]
-INACTIVITY_TIMEOUT = 9.0   # seconds of silence before going offline
+INACTIVITY_TIMEOUT = 30.0  # seconds of silence before going offline
 
 
 class ConversationEngine:
