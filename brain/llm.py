@@ -28,12 +28,19 @@ class Brain:
     def think(self, user_text: str) -> str:
         """Process a user utterance and return the robot's spoken reply."""
         self._history.append({"role": "user", "content": user_text})
+        print(f"[Brain] Sending to API (model={MODEL}, history_len={len(self._history)})...")
 
-        response = self._client.chat.completions.create(
-            model=MODEL,
-            messages=self._history,
-        )
+        try:
+            response = self._client.chat.completions.create(
+                model=MODEL,
+                messages=self._history,
+                timeout=30,
+            )
+        except Exception as exc:
+            print(f"[Brain] API error: {exc}")
+            return "Sorry, I couldn't reach my brain right now."
 
+        print("[Brain] Got response.")
         reply = response.choices[0].message.content or ""
         self._history.append({"role": "assistant", "content": reply})
         return reply

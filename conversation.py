@@ -52,6 +52,7 @@ class ConversationEngine:
 
         # --- ONLINE mode ---
         self._last_activity = now
+        print(f"[Online heard] {text}")
         print(f"You said: {text}")
 
         if any(w in normalized for w in GOODBYE_WORDS):
