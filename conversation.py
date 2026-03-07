@@ -5,12 +5,15 @@ State machine:
   ONLINE:  passes every utterance to the LLM and speaks the reply.
            Returns to OFFLINE on inactivity timeout or a goodbye phrase.
 """
+import re
+import threading
 import time
 
 from brain import Brain
 from memory import MemoryStore
 from Tools import handle_speech as handle_tool_speech
-from voice.tts import speak
+from Tools.commands import parse_command
+from voice.tts import SpeechHandle, interrupt as interrupt_speech, speak
 
 WAKE_WORDS = [
     # Intended wake word + common Whisper mis-transcriptions
@@ -25,6 +28,16 @@ WAKE_WORDS = [
     "hei robotti",
 ]
 GOODBYE_WORDS = ["goodbye", "bye", "näkemiin", "hei hei", "stop listening"]
+INTERRUPT_WORDS = [
+    "stop",
+    "stop talking",
+    "be quiet",
+    "quiet",
+    "pause",
+    "wait",
+    "hold on",
+    "shut up",
+]
 INACTIVITY_TIMEOUT = 60.0  # seconds of silence before going offline
 
 
@@ -38,37 +51,128 @@ class ConversationEngine:
         self._last_activity = time.monotonic()
         self._session_id: str | None = None
         self._person_id: str | None = None
+        self._lock = threading.RLock()
+        self._reply_cancel_event: threading.Event | None = None
+        self._reply_generation = 0
+        self._active_reply_text = ""
 
     # ------------------------------------------------------------------
     def handle(self, text: str, now: float) -> None:
         """Called by main.py for every transcribed utterance."""
-        # Check inactivity timeout before anything else.
-        if self._online and (now - self._last_activity) >= INACTIVITY_TIMEOUT:
-            print(
-                f"[Engine] No speech for {INACTIVITY_TIMEOUT:.0f}s — going OFFLINE."
-            )
-            self._end_session("timeout")
+        with self._lock:
+            if self._online and (now - self._last_activity) >= INACTIVITY_TIMEOUT:
+                print(
+                    f"[Engine] No speech for {INACTIVITY_TIMEOUT:.0f}s — going OFFLINE."
+                )
+                self._end_session("timeout")
 
-        normalized = text.lower()
-        matched_wake_word = next((word for word in WAKE_WORDS if word in normalized), None)
+            normalized = text.lower()
+            matched_wake_word = next((word for word in WAKE_WORDS if word in normalized), None)
 
-        if not self._online:
-            print(f"[Offline heard] {text}")
+            if not self._online:
+                print(f"[Offline heard] {text}")
+                if not matched_wake_word:
+                    return
+                remainder = self._strip_phrase(text, matched_wake_word)
+                self._start_session(now, matched_wake_word, announce=not bool(remainder))
+                if remainder:
+                    self._process_online_text(remainder, now=now)
+                return
+
+            self._process_online_text(text, now=now)
+
+    def handle_interruption(self, text: str, now: float) -> bool:
+        """Handle an utterance captured while the bot is speaking."""
+        with self._lock:
+            normalized = text.lower()
+            matched_wake_word = next((word for word in WAKE_WORDS if word in normalized), None)
+            matched_interrupt = next((word for word in INTERRUPT_WORDS if word in normalized), None)
+            local_command = parse_command(text)
+            clear_interrupt = self._looks_like_clear_interrupt(text)
+            if (
+                not matched_wake_word
+                and not matched_interrupt
+                and local_command is None
+                and not clear_interrupt
+            ):
+                return False
+
+            print(f"[Interrupt heard] {text}")
+            self._cancel_active_reply_locked()
+            interrupt_speech()
+
             if matched_wake_word:
-                self._start_session(now, matched_wake_word)
-            return
+                remainder = self._strip_phrase(text, matched_wake_word)
+            elif matched_interrupt:
+                remainder = self._strip_phrase(text, matched_interrupt)
+            else:
+                remainder = text.strip()
 
-        # --- ONLINE mode ---
+            if not remainder:
+                self._last_activity = now
+                return True
+
+            self._process_online_text(remainder, now=now)
+            return True
+
+    # ------------------------------------------------------------------
+    def bind_person(self, person_id: str | None) -> None:
+        """Attach a recognized speaker to the next or current session."""
+        with self._lock:
+            self._person_id = person_id
+            if person_id:
+                self._store.touch_person(person_id)
+                if self._session_id:
+                    self._store.attach_person_to_session(self._session_id, person_id)
+
+    def _start_session(self, now: float, wake_word: str, *, announce: bool) -> None:
+        self._brain.reset()
+        self._online = True
+        self._last_activity = now
+        self._session_id = self._store.start_session(person_id=self._person_id, wake_word=wake_word)
+        self._store.add_event(
+            "session_started",
+            session_id=self._session_id,
+            person_id=self._person_id,
+            payload={"wake_word": wake_word},
+        )
+        print("[Engine] Wake word detected — going ONLINE.")
+        if announce:
+            self._speak_reply("Hey! I'm listening.")
+
+    def _end_session(self, reason: str) -> None:
+        with self._lock:
+            self._cancel_active_reply_locked()
+        session_id = self._session_id
+        person_id = self._person_id
+        if session_id:
+            threading.Thread(
+                target=self._brain.summarize_session,
+                args=(session_id,),
+                kwargs={"person_id": person_id},
+                daemon=True,
+            ).start()
+            self._store.end_session(session_id, end_reason=reason)
+            self._store.add_event(
+                "session_ended",
+                session_id=session_id,
+                person_id=person_id,
+                payload={"reason": reason},
+            )
+        self._online = False
+        self._session_id = None
+        self._brain.reset()
+        print(f"[Engine] OFFLINE. Say '{WAKE_WORDS[0]}' to wake me up.")
+
+    def _process_online_text(self, text: str, *, now: float) -> None:
         self._last_activity = now
         print(f"[Online heard] {text}")
         print(f"You said: {text}")
         self._log_user_message(text)
 
+        normalized = text.lower()
         if any(w in normalized for w in GOODBYE_WORDS):
-            reply = "Okay, going offline."
-            self._log_assistant_message(reply)
-            speak(reply)
-            self._end_session("goodbye")
+            self._speak_reply("Okay, going offline.", end_session_reason="goodbye")
             return
 
         tool_result = handle_tool_speech(text)
@@ -83,54 +187,158 @@ class ConversationEngine:
                 )
             if tool_result.response:
                 print(f"[Tool] {tool_result.action}: {tool_result.response}")
-                self._log_assistant_message(tool_result.response)
-                speak(tool_result.response)
+                self._speak_reply(tool_result.response)
             return
 
         print("[Brain] Thinking...")
-        reply = self._brain.think(text, session_id=self._session_id, person_id=self._person_id)
-        print(f"[LLM] {reply}")
-        self._log_assistant_message(reply)
-        speak(reply)
-        self._last_activity = time.monotonic()  # reset timer after bot finishes speaking
-
-    # ------------------------------------------------------------------
-    def bind_person(self, person_id: str | None) -> None:
-        """Attach a recognized speaker to the next or current session."""
-        self._person_id = person_id
-        if person_id:
-            self._store.touch_person(person_id)
-            if self._session_id:
-                self._store.attach_person_to_session(self._session_id, person_id)
-
-    def _start_session(self, now: float, wake_word: str) -> None:
-        self._brain.reset()
-        self._online = True
-        self._last_activity = now
-        self._session_id = self._store.start_session(person_id=self._person_id, wake_word=wake_word)
-        self._store.add_event(
-            "session_started",
+        self._start_streamed_reply(
+            text=text,
             session_id=self._session_id,
             person_id=self._person_id,
-            payload={"wake_word": wake_word},
         )
-        print("[Engine] Wake word detected — going ONLINE.")
-        speak("Hey! I'm listening.")
 
-    def _end_session(self, reason: str) -> None:
-        if self._session_id:
-            self._brain.summarize_session(self._session_id, person_id=self._person_id)
-            self._store.end_session(self._session_id, end_reason=reason)
-            self._store.add_event(
-                "session_ended",
-                session_id=self._session_id,
-                person_id=self._person_id,
-                payload={"reason": reason},
+    def _speak_reply(self, text: str, *, end_session_reason: str | None = None) -> SpeechHandle | None:
+        text = (text or "").strip()
+        if not text:
+            if end_session_reason:
+                self._end_session(end_session_reason)
+            return None
+
+        self._log_assistant_message(text)
+        handle = speak(text)
+        handle.add_done_callback(
+            lambda finished_handle: self._on_reply_finished(
+                finished_handle,
+                end_session_reason=end_session_reason,
             )
-        self._online = False
-        self._session_id = None
-        self._brain.reset()
-        print(f"[Engine] OFFLINE. Say '{WAKE_WORDS[0]}' to wake me up.")
+        )
+        return handle
+
+    def _start_streamed_reply(
+        self,
+        *,
+        text: str,
+        session_id: str | None,
+        person_id: str | None,
+    ) -> None:
+        cancel_event = threading.Event()
+        with self._lock:
+            self._cancel_active_reply_locked()
+            self._reply_generation += 1
+            generation = self._reply_generation
+            self._reply_cancel_event = cancel_event
+            self._active_reply_text = ""
+        threading.Thread(
+            target=self._run_streamed_reply,
+            args=(text, session_id, person_id, generation, cancel_event),
+            daemon=True,
+        ).start()
+
+    def _run_streamed_reply(
+        self,
+        text: str,
+        session_id: str | None,
+        person_id: str | None,
+        generation: int,
+        cancel_event: threading.Event,
+    ) -> None:
+        reply = self._speak_streamed_reply(
+            self._brain.stream_think(
+                text,
+                session_id=session_id,
+                person_id=person_id,
+                stop_event=cancel_event,
+            ),
+            generation=generation,
+            cancel_event=cancel_event,
+        )
+        if reply:
+            print(f"[LLM] {reply}")
+        with self._lock:
+            if self._reply_cancel_event is cancel_event:
+                self._reply_cancel_event = None
+            if generation == self._reply_generation and cancel_event.is_set():
+                self._active_reply_text = ""
+
+    def _speak_streamed_reply(self, chunks, *, generation: int, cancel_event: threading.Event) -> str:
+        last_handle: SpeechHandle | None = None
+        reply_parts: list[str] = []
+        for chunk in chunks:
+            with self._lock:
+                if cancel_event.is_set() or generation != self._reply_generation:
+                    break
+            cleaned = chunk.strip()
+            if not cleaned:
+                continue
+            reply_parts.append(cleaned)
+            with self._lock:
+                if cancel_event.is_set() or generation != self._reply_generation:
+                    break
+                self._active_reply_text = " ".join(reply_parts).strip()
+            last_handle = speak(cleaned)
+
+        full_reply = " ".join(reply_parts).strip()
+        if not full_reply:
+            return ""
+
+        with self._lock:
+            cancelled = cancel_event.is_set() or generation != self._reply_generation
+        if cancelled:
+            return full_reply
+
+        self._log_assistant_message(full_reply)
+        if last_handle is not None:
+            last_handle.add_done_callback(
+                lambda finished_handle: self._on_reply_finished(
+                    finished_handle,
+                    end_session_reason=None,
+                )
+            )
+        return full_reply
+
+    def _on_reply_finished(
+        self,
+        handle: SpeechHandle,
+        *,
+        end_session_reason: str | None,
+    ) -> None:
+        with self._lock:
+            if not handle.interrupted.is_set():
+                self._active_reply_text = ""
+            self._last_activity = time.monotonic()
+            if end_session_reason:
+                self._end_session(end_session_reason)
+
+    @staticmethod
+    def _strip_phrase(text: str, phrase: str) -> str:
+        pattern = re.compile(re.escape(phrase), re.IGNORECASE)
+        stripped = pattern.sub("", text, count=1)
+        return stripped.strip(" ,.!?:;-")
+
+    def _cancel_active_reply_locked(self) -> None:
+        if self._reply_cancel_event is not None:
+            self._reply_cancel_event.set()
+            self._reply_cancel_event = None
+        self._reply_generation += 1
+        self._active_reply_text = ""
+
+    def _looks_like_clear_interrupt(self, text: str) -> bool:
+        normalized = text.lower().strip()
+        if not normalized:
+            return False
+
+        words = re.findall(r"\w+", normalized)
+        if len(words) < 2 and len(normalized) < 8:
+            return False
+
+        active_words = set(re.findall(r"\w+", self._active_reply_text.lower()))
+        if active_words:
+            current_words = set(words)
+            overlap = len(current_words & active_words) / max(1, len(current_words))
+            if overlap >= 0.8:
+                return False
+
+        return True
 
     def _log_user_message(self, text: str) -> None:
         if self._session_id:

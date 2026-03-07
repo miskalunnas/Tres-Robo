@@ -2,7 +2,10 @@
 
 import json
 import os
+import re
 import time
+from collections.abc import Iterator
+import threading
 
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -55,6 +58,70 @@ class Brain:
         if not session_id:
             self._history.append({"role": "assistant", "content": reply})
         return reply
+
+    def stream_think(
+        self,
+        user_text: str,
+        *,
+        session_id: str | None = None,
+        person_id: str | None = None,
+        stop_event: threading.Event | None = None,
+    ) -> Iterator[str]:
+        """Yield a reply in speakable chunks as they arrive from the LLM."""
+        messages = self._build_messages(user_text, session_id=session_id, person_id=person_id)
+        print(f"[Brain] Streaming API call (model={MODEL}, history_len={len(messages)})...")
+
+        t0 = time.monotonic()
+        try:
+            stream = self._client.chat.completions.create(
+                model=MODEL,
+                messages=messages,
+                timeout=30,
+                stream=True,
+            )
+        except Exception as exc:
+            print(f"[Brain] Streaming API error: {exc}")
+            yield "Sorry, I couldn't reach my brain right now."
+            return
+
+        buffer = ""
+        emitted_parts: list[str] = []
+        try:
+            for event in stream:
+                if stop_event is not None and stop_event.is_set():
+                    print("[Brain] Streaming cancelled.")
+                    return
+                delta = ""
+                if event.choices:
+                    delta = event.choices[0].delta.content or ""
+                if not delta:
+                    continue
+                buffer += delta
+                chunks, buffer = self._extract_speakable_chunks(buffer)
+                for chunk in chunks:
+                    if stop_event is not None and stop_event.is_set():
+                        print("[Brain] Streaming cancelled.")
+                        return
+                    emitted_parts.append(chunk)
+                    yield chunk
+        except Exception as exc:
+            print(f"[Brain] Streaming interrupted: {exc}")
+            if not emitted_parts:
+                yield "Sorry, I lost my train of thought."
+            return
+        finally:
+            print(f"[Timing] LLM stream: {time.monotonic()-t0:.2f}s")
+
+        if stop_event is not None and stop_event.is_set():
+            print("[Brain] Streaming cancelled.")
+            return
+        tail = buffer.strip()
+        if tail:
+            emitted_parts.append(tail)
+            yield tail
+
+        if not session_id:
+            self._history.append({"role": "assistant", "content": " ".join(emitted_parts).strip()})
 
     def summarize_session(self, session_id: str, *, person_id: str | None = None) -> None:
         """Extract durable facts from a finished session and store them."""
@@ -145,3 +212,17 @@ class Brain:
 
     def _reset_history(self) -> None:
         self._history = [{"role": "system", "content": SYSTEM_PROMPT}]
+
+    @staticmethod
+    def _extract_speakable_chunks(buffer: str) -> tuple[list[str], str]:
+        chunks: list[str] = []
+        pattern = re.compile(r"(.+?[.!?]+(?:\s+|$))", re.DOTALL)
+        while True:
+            match = pattern.match(buffer)
+            if match is None:
+                break
+            chunk = match.group(1).strip()
+            if chunk:
+                chunks.append(chunk)
+            buffer = buffer[match.end():]
+        return chunks, buffer

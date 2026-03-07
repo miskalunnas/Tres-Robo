@@ -4,7 +4,6 @@ restaurants via the Unisafka.fi static JSON API.
 Supported restaurants: Reaktori, Newton, Konehuone, Hertsi
 """
 
-import math
 import sys
 from datetime import date
 
@@ -45,13 +44,8 @@ def _resolve_name(name: str) -> str | None:
 
 
 def _week_number() -> int:
-    """Replicate the Unisafka week-number algorithm (days since Jan 1 / 7, ceil)."""
-    today = date.today()
-    days = (today - date(today.year, 1, 1)).days
-    week = math.ceil(days / 7)
-    if today.weekday() == 6:
-        week += 1
-    return week
+    """Return the ISO week number used by Unisafka's JSON files."""
+    return date.today().isocalendar().week
 
 
 _DAYS_FI = ("ma", "ti", "ke", "to", "pe", "la", "su")

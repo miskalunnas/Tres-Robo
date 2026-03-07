@@ -6,3 +6,7 @@ noisereduce
 opencv-python
 face_recognition
 yt-dlp
+python-dotenv
+openai
+elevenlabs
+requests

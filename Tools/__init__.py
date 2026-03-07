@@ -63,6 +63,8 @@ def handle_speech(text: str) -> ToolExecutionResult:
             response = get_menu(restaurant)
         else:
             response = get_all_menus()
+        if response.startswith("Failed to fetch") or response.startswith("Unknown restaurant"):
+            success = False
     elif action == "tell_time":
         from datetime import datetime
 

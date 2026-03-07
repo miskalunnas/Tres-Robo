@@ -72,9 +72,33 @@ MENU_KEYWORDS = (
     "what are they serving", "what do they serve",
     "food menu", "daily menu", "check the menu",
     "what's cooking", "whats cooking",
+    "ruokalista", "lounaslista", "päivän ruoka", "paivan ruoka",
+    "päivän lounas", "paivan lounas", "mitä ruuaksi", "mita ruuaksi",
+    "mitä lounaaksi", "mita lounaaksi", "mitä on ruokana", "mita on ruokana",
+    "mitä on lounaalla", "mita on lounaalla",
     "lunch", "menu",
 )
-RESTAURANT_NAMES = ("reaktori", "cafe konehuone", "konehuone", "hertsi", "newton")
+RESTAURANT_ALIASES: dict[str, str] = {
+    "reaktori": "reaktori",
+    "reaktorin": "reaktori",
+    "reaktorissa": "reaktori",
+    "foodco": "reaktori",
+    "food co": "reaktori",
+    "food and co": "reaktori",
+    "food & co": "reaktori",
+    "konehuone": "konehuone",
+    "konehuoneen": "konehuone",
+    "konehuoneessa": "konehuone",
+    "cafe konehuone": "konehuone",
+    "café konehuone": "konehuone",
+    "hertsi": "hertsi",
+    "hertsin": "hertsi",
+    "hertsissä": "hertsi",
+    "hertsissa": "hertsi",
+    "newton": "newton",
+    "newtonin": "newton",
+    "newtonissa": "newton",
+}
 
 # Greeting / small talk
 GREETING_KEYWORDS = (
@@ -213,7 +237,7 @@ def parse_command(text: str) -> dict | None:
 
 def _detect_restaurant(text: str) -> str | None:
     """Return the first restaurant name found in *text*, or None."""
-    for name in RESTAURANT_NAMES:
-        if name in text:
-            return name
+    for alias, canonical in sorted(RESTAURANT_ALIASES.items(), key=lambda item: len(item[0]), reverse=True):
+        if alias in text:
+            return canonical
     return None

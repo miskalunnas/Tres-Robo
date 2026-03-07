@@ -1,6 +1,8 @@
 import queue
 import sys
+import threading
 import time
+from dataclasses import dataclass
 
 import numpy as np
 import sounddevice as sd
@@ -13,7 +15,7 @@ except Exception:  # noqa: BLE001
     nr = None
 
 from conversation import ConversationEngine
-from voice.tts import is_speaking
+from voice.tts import is_busy
 
 # Rate expected by webrtcvad and Whisper. Capture may differ — we resample.
 VAD_SAMPLE_RATE = 16_000
@@ -27,6 +29,11 @@ MIN_SEGMENT_SECONDS = 0.5
 MAX_SEGMENT_SECONDS = 8.0
 MAX_SILENCE_BETWEEN_SPEECH_SECONDS = 0.8
 
+# Interruption capture runs with shorter segments so the user can cut in.
+INTERRUPT_MIN_SEGMENT_SECONDS = 0.25
+INTERRUPT_MAX_SEGMENT_SECONDS = 3.0
+INTERRUPT_MAX_SILENCE_BETWEEN_SPEECH_SECONDS = 0.35
+
 # Set True to run noisereduce on each segment before Whisper (adds ~100 ms).
 USE_DENOISER = False
 
@@ -38,13 +45,43 @@ WHISPER_PROMPT = (
     "what, how, why, yes, no, kyllä, ei."
 )
 
-audio_queue: "queue.Queue[np.ndarray]" = queue.Queue()
+
+@dataclass
+class SegmentTask:
+    frames: list[np.ndarray]
+    heard_at: float
+    interruption: bool = False
+
+
+@dataclass
+class UtteranceTask:
+    text: str
+    heard_at: float
+    interruption: bool = False
+
+
+audio_queue: "queue.Queue[np.ndarray]" = queue.Queue(maxsize=128)
+segment_queue: "queue.Queue[SegmentTask]" = queue.Queue(maxsize=8)
+utterance_queue: "queue.Queue[UtteranceTask]" = queue.Queue(maxsize=8)
+
+
+def _put_latest(q: queue.Queue, item) -> None:
+    """Keep queues bounded by dropping the oldest pending item when full."""
+    while True:
+        try:
+            q.put_nowait(item)
+            return
+        except queue.Full:
+            try:
+                q.get_nowait()
+            except queue.Empty:
+                return
 
 
 def audio_callback(indata, frames, time_info, status) -> None:  # noqa: ARG001
     if status:
         print(f"[Audio status] {status}", file=sys.stderr)
-    audio_queue.put(indata.copy())
+    _put_latest(audio_queue, indata.copy())
 
 
 def resample(audio: np.ndarray, from_sr: int, to_sr: int) -> np.ndarray:
@@ -88,6 +125,36 @@ def transcribe(
     return text
 
 
+def _transcription_worker(model: WhisperModel, native_sr: int) -> None:
+    while True:
+        task = segment_queue.get()
+        try:
+            text = transcribe(model, task.frames, native_sr)
+            if text:
+                _put_latest(
+                    utterance_queue,
+                    UtteranceTask(
+                        text=text,
+                        heard_at=task.heard_at,
+                        interruption=task.interruption,
+                    ),
+                )
+        finally:
+            segment_queue.task_done()
+
+
+def _dialogue_worker(engine: ConversationEngine) -> None:
+    while True:
+        utterance = utterance_queue.get()
+        try:
+            if utterance.interruption:
+                engine.handle_interruption(utterance.text, now=utterance.heard_at)
+            else:
+                engine.handle(utterance.text, now=utterance.heard_at)
+        finally:
+            utterance_queue.task_done()
+
+
 def listen_forever() -> None:
     # MIC_DEVICE: ALSA device string or sounddevice index for the USB mic.
     # PortAudio sometimes misreports USB capture devices as 0 input channels
@@ -108,11 +175,31 @@ def listen_forever() -> None:
     vad_frame_len = int(VAD_SAMPLE_RATE * VAD_FRAME_DURATION_MS / 1000)
 
     engine = ConversationEngine()
+    threading.Thread(
+        target=_transcription_worker,
+        args=(model, native_sr),
+        daemon=True,
+    ).start()
+    threading.Thread(
+        target=_dialogue_worker,
+        args=(engine,),
+        daemon=True,
+    ).start()
+
+    identity_watcher = None
+    try:
+        from vision.live_identity import IdentityWatcher
+
+        identity_watcher = IdentityWatcher(engine.bind_person)
+        identity_watcher.start()
+    except Exception as exc:
+        print(f"[Vision] Live identity disabled: {exc}")
 
     speech_frames: list[np.ndarray] = []
     segment_duration = 0.0
     silence_duration = 0.0
     last_speech_time = time.monotonic()
+    capture_mode = "normal"
 
     with sd.InputStream(
         samplerate=native_sr,
@@ -129,13 +216,12 @@ def listen_forever() -> None:
                 if chunk.size == 0:
                     continue
 
-                # Ignore microphone frames while the robot is speaking to avoid
-                # feeding its own voice back into STT. Barge-in can be added later.
-                if is_speaking():
+                current_mode = "interrupt" if is_busy() else "normal"
+                if current_mode != capture_mode:
                     speech_frames.clear()
                     segment_duration = 0.0
                     silence_duration = 0.0
-                    continue
+                    capture_mode = current_mode
 
                 # Mono
                 mono = chunk[:, 0] if chunk.ndim > 1 else chunk
@@ -156,26 +242,53 @@ def listen_forever() -> None:
                     silence_duration = 0.0
                     last_speech_time = time.monotonic()
 
-                    if segment_duration >= MAX_SEGMENT_SECONDS:
-                        text = transcribe(model, speech_frames, native_sr)
+                    max_segment = (
+                        INTERRUPT_MAX_SEGMENT_SECONDS
+                        if capture_mode == "interrupt"
+                        else MAX_SEGMENT_SECONDS
+                    )
+                    if segment_duration >= max_segment:
+                        _put_latest(
+                            segment_queue,
+                            SegmentTask(
+                                frames=list(speech_frames),
+                                heard_at=last_speech_time,
+                                interruption=(capture_mode == "interrupt"),
+                            ),
+                        )
                         speech_frames.clear()
                         segment_duration = 0.0
-                        if text:
-                            engine.handle(text, now=last_speech_time)
 
                 else:
                     if speech_frames:
                         silence_duration += frame_seconds
-                        if silence_duration >= MAX_SILENCE_BETWEEN_SPEECH_SECONDS:
-                            if segment_duration >= MIN_SEGMENT_SECONDS:
-                                text = transcribe(model, speech_frames, native_sr)
-                                if text:
-                                    engine.handle(text, now=last_speech_time)
+                        max_silence = (
+                            INTERRUPT_MAX_SILENCE_BETWEEN_SPEECH_SECONDS
+                            if capture_mode == "interrupt"
+                            else MAX_SILENCE_BETWEEN_SPEECH_SECONDS
+                        )
+                        min_segment = (
+                            INTERRUPT_MIN_SEGMENT_SECONDS
+                            if capture_mode == "interrupt"
+                            else MIN_SEGMENT_SECONDS
+                        )
+                        if silence_duration >= max_silence:
+                            if segment_duration >= min_segment:
+                                _put_latest(
+                                    segment_queue,
+                                    SegmentTask(
+                                        frames=list(speech_frames),
+                                        heard_at=last_speech_time,
+                                        interruption=(capture_mode == "interrupt"),
+                                    ),
+                                )
                             speech_frames.clear()
                             segment_duration = 0.0
                             silence_duration = 0.0
 
         except KeyboardInterrupt:
+            if identity_watcher is not None:
+                identity_watcher.stop()
             print("\nStopping. Goodbye!")
 
 
