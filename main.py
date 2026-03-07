@@ -14,7 +14,7 @@ WAKE_WORDS = ["hei botti"]
 INACTIVITY_TIMEOUT_SECONDS = 9.0
 
 # Minimum loudness in dB for audio to be treated as speech.
-DB_THRESHOLD = 60.0
+DB_THRESHOLD = 45.0
 
 # How many seconds of loud audio we collect before sending it to Whisper.
 MIN_CHUNK_SECONDS = 2.0
