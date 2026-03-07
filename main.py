@@ -86,10 +86,21 @@ def transcribe(
 
 
 def listen_forever() -> None:
+    # MIC_DEVICE: set to the integer index of your USB microphone.
+    # Run: python -c "import sounddevice as sd; print(sd.query_devices())"
+    # to list devices, then set the index of the one with input channels.
+    MIC_DEVICE = 0
+
     try:
-        device_info = sd.query_devices(kind="input")
+        device_info = sd.query_devices(MIC_DEVICE)
     except Exception as exc:  # noqa: BLE001
         print(f"[ERROR] Could not query audio devices: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    if device_info["max_input_channels"] == 0:
+        print(f"[ERROR] Device {MIC_DEVICE} '{device_info['name']}' has no input channels.", file=sys.stderr)
+        print("Available devices:", file=sys.stderr)
+        print(sd.query_devices(), file=sys.stderr)
         sys.exit(1)
 
     native_sr = int(device_info["default_samplerate"])
@@ -116,7 +127,7 @@ def listen_forever() -> None:
     with sd.InputStream(
         samplerate=native_sr,
         blocksize=capture_block,
-        device=0,
+        device=MIC_DEVICE,
         dtype="float32",
         channels=1,
         callback=audio_callback,
