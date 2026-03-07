@@ -170,8 +170,4 @@ def listen_forever() -> None:
 
 
 if __name__ == "__main__":
-    listen_forever()
-<<<<<<< HEAD
-=======
-
->>>>>>> 852d9559b86706c3f8b1ce910f218a9973cafcea
+    recognize_forever()
