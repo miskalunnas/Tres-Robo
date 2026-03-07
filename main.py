@@ -15,7 +15,7 @@ except Exception:  # noqa: BLE001
 
 
 # Wake word(s) that will bring the robot online.
-WAKE_WORDS = ["hei botti"]
+WAKE_WORDS = ["founderbot"]
 
 # Target sample rate for both VAD and Whisper input.
 TARGET_SAMPLE_RATE = 16_000
@@ -127,7 +127,7 @@ def recognize_forever() -> None:
     is_online = False
     last_activity_time = time.monotonic()
 
-    print("Robot is OFFLINE. Say 'Hei botti' to wake it up. (Ctrl+C to stop)")
+    print("Robot is OFFLINE. Say 'founderbot' to wake it up. (Ctrl+C to stop)")
 
     # Buffers for current speech segment.
     speech_frames: list[np.ndarray] = []
@@ -152,7 +152,7 @@ def recognize_forever() -> None:
                     is_online = False
                     print(
                         f"[Robot] No speech for {INACTIVITY_TIMEOUT_SECONDS:.0f} seconds. "
-                        "Going OFFLINE. Say 'Hei botti' to wake me up again."
+                        "Going OFFLINE. Say 'founderbot' to wake me up again."
                     )
 
                 chunk = audio_queue.get()
