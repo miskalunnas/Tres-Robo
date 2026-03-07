@@ -3,6 +3,7 @@
 Falls back to a print stub if the API key is not set.
 Audio is played through the system default output (Bluetooth speaker).
 """
+import os
 import subprocess
 import sys
 import time
