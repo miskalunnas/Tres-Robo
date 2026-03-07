@@ -170,4 +170,5 @@ def listen_forever() -> None:
 
 
 if __name__ == "__main__":
-    recognize_forever()
+    listen_forever()
+
