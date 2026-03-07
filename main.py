@@ -18,7 +18,7 @@ except Exception:  # noqa: BLE001
 WAKE_WORDS = ["founderbot"]
 
 # Target sample rate for both VAD and Whisper input.
-TARGET_SAMPLE_RATE = 16_000
+TARGET_SAMPLE_RATE = 48_000
 
 # How long (in seconds) of no recognized speech before going back to offline mode.
 INACTIVITY_TIMEOUT_SECONDS = 9.0
