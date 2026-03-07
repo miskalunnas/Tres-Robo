@@ -8,3 +8,4 @@ deepface
 openai
 python-dotenv
 yt-dlp
+requests
