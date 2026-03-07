@@ -74,7 +74,7 @@ MENU_KEYWORDS = (
     "what's cooking", "whats cooking",
     "lunch", "menu",
 )
-RESTAURANT_NAMES = ("reaktori", "konehuone", "hertsi", "newton")
+RESTAURANT_NAMES = ("reaktori", "cafe konehuone", "konehuone", "hertsi", "newton")
 
 # Greeting / small talk
 GREETING_KEYWORDS = (
