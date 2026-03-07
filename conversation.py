@@ -10,7 +10,18 @@ import time
 from brain import Brain
 from voice.tts import speak
 
-WAKE_WORDS = ["founderbot"]
+WAKE_WORDS = [
+    # Intended wake word + common Whisper mis-transcriptions
+    "founderbot",
+    "founderbott"
+    "founder bot",
+    "found a bot",
+    "founder bott",
+    # Finnish alternatives
+    "hei botti",
+    "founderbotti",
+    "hei robotti",
+]
 GOODBYE_WORDS = ["goodbye", "bye", "näkemiin", "hei hei", "stop listening"]
 INACTIVITY_TIMEOUT = 9.0   # seconds of silence before going offline
 

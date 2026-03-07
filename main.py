@@ -29,6 +29,15 @@ MAX_SILENCE_BETWEEN_SPEECH_SECONDS = 0.8
 # Set True to run noisereduce on each segment before Whisper (adds ~100 ms).
 USE_DENOISER = False
 
+# Whisper model size: "tiny" is fastest; "small" is more accurate for Finnish.
+WHISPER_MODEL = "small"
+
+# Initial prompt biases Whisper toward Finnish and English vocabulary.
+WHISPER_PROMPT = (
+    "Founderbot, hei botti, hello, moi, terve, kiitos, ole hyvä, "
+    "what, how, why, yes, no, kyllä, ei."
+)
+
 audio_queue: "queue.Queue[np.ndarray]" = queue.Queue()
 
 
@@ -70,7 +79,7 @@ def transcribe(
             audio = nr.reduce_noise(y=audio, sr=VAD_SAMPLE_RATE)
         except Exception as exc:  # noqa: BLE001
             print(f"[Denoiser error] {exc}", file=sys.stderr)
-    segments, info = model.transcribe(audio, task="transcribe")
+    segments, info = model.transcribe(audio, task="transcribe", initial_prompt=WHISPER_PROMPT)
     text = "".join(seg.text for seg in segments).strip()
     if text:
         print(f"[Whisper/{info.language}] {text}")
@@ -87,8 +96,8 @@ def listen_forever() -> None:
     native_sr = int(device_info["default_samplerate"])
     print(f"[Mic] {device_info['name']} — native {native_sr} Hz, VAD/Whisper at {VAD_SAMPLE_RATE} Hz")
 
-    print("Loading Whisper model 'tiny'... (first run may take a moment)")
-    model = WhisperModel("tiny", device="cpu", compute_type="int8")
+    print(f"Loading Whisper model '{WHISPER_MODEL}'... (first run may take a moment)")
+    model = WhisperModel(WHISPER_MODEL, device="cpu", compute_type="int8")
 
     vad = webrtcvad.Vad(VAD_AGGRESSIVENESS)
 
