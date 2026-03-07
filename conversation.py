@@ -23,7 +23,7 @@ WAKE_WORDS = [
     "hei robotti",
 ]
 GOODBYE_WORDS = ["goodbye", "bye", "näkemiin", "hei hei", "stop listening"]
-INACTIVITY_TIMEOUT = 30.0  # seconds of silence before going offline
+INACTIVITY_TIMEOUT = 60.0  # seconds of silence before going offline
 
 
 class ConversationEngine:
@@ -60,6 +60,7 @@ class ConversationEngine:
         if any(w in normalized for w in GOODBYE_WORDS):
             reply = self._brain.think(text)
             speak(reply)
+            self._last_activity = time.monotonic()
             self._end_session()
             return
 
@@ -67,6 +68,7 @@ class ConversationEngine:
         reply = self._brain.think(text)
         print(f"[LLM] {reply}")
         speak(reply)
+        self._last_activity = time.monotonic()  # reset timer after bot finishes speaking
 
     # ------------------------------------------------------------------
     def _start_session(self, now: float) -> None:

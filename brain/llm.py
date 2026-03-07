@@ -1,4 +1,4 @@
-"""Brain: calls Kimi K2 on Moonshot AI."""
+"""Brain: calls GPT-4o-mini on OpenAI."""
 import os
 import time
 
@@ -7,7 +7,7 @@ from openai import OpenAI
 
 load_dotenv()
 
-MODEL = os.getenv("MOONSHOT_MODEL", "kimi-k2")
+MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
 _PROMPT_FILE = os.path.join(os.path.dirname(__file__), "system_prompt.txt")
 with open(_PROMPT_FILE, encoding="utf-8") as _f:
@@ -17,8 +17,7 @@ with open(_PROMPT_FILE, encoding="utf-8") as _f:
 class Brain:
     def __init__(self) -> None:
         self._client = OpenAI(
-            api_key=os.environ["MOONSHOT_API_KEY"],
-            base_url="https://api.moonshot.ai/v1",
+            api_key=os.environ["OPENAI_API_KEY"],
         )
         self._history: list[dict] = []
         self._reset_history()
