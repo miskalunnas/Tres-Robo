@@ -1,4 +1,6 @@
 sounddevice
 numpy
 faster-whisper
+opencv-python
+face_recognition
 
