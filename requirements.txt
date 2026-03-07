@@ -6,3 +6,4 @@ noisereduce
 opencv-python
 face_recognition
 yt-dlp
+requests
