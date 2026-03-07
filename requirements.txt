@@ -1,3 +1,5 @@
 sounddevice
 vosk
+openai
+python-dotenv
 

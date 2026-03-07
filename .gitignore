@@ -1,0 +1,29 @@
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Environment variables
+.env
+
+# Vosk models (large binary files)
+models/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Byte-compiled / optimized / DLL files
+*.egg-info/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
