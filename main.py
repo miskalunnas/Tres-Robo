@@ -1,6 +1,7 @@
 import json
 import queue
 import sys
+import time
 from pathlib import Path
 
 import sounddevice as sd
@@ -8,6 +9,11 @@ import vosk
 
 
 MODEL_PATH = Path("models/vosk-model-small-en-us-0.15")
+
+# Wake word(s) that will bring the robot online.
+WAKE_WORDS = ["hei botti"]
+# How long (in seconds) of no recognized speech before going back to offline mode.
+INACTIVITY_TIMEOUT_SECONDS = 7.0
 
 audio_queue: "queue.Queue[bytes]" = queue.Queue()
 
@@ -25,7 +31,7 @@ def ensure_model_exists() -> None:
         sys.exit(1)
 
 
-def audio_callback(indata, frames, time, status) -> None:
+def audio_callback(indata, frames, time_info, status) -> None:  # noqa: ARG001
     """Callback from sounddevice whenever new audio data is available."""
     if status:
         print(f"[Audio status] {status}", file=sys.stderr)
@@ -33,7 +39,7 @@ def audio_callback(indata, frames, time, status) -> None:
 
 
 def recognize_forever() -> None:
-    """Continuously listen to the default microphone and print recognized text."""
+    """Continuously listen to the microphone with wake-word controlled online/offline modes."""
     ensure_model_exists()
 
     # Get default input device info (this should be your wired mic)
@@ -53,6 +59,11 @@ def recognize_forever() -> None:
     model = vosk.Model(str(MODEL_PATH))
     recognizer = vosk.KaldiRecognizer(model, samplerate)
 
+    is_online = False
+    last_activity_time = time.monotonic()
+
+    print("Robot is OFFLINE. Say 'Hei botti' to wake it up. (Ctrl+C to stop)")
+
     # Open an audio stream from the default input device
     with sd.RawInputStream(
         samplerate=samplerate,
@@ -62,16 +73,47 @@ def recognize_forever() -> None:
         channels=1,
         callback=audio_callback,
     ):
-        print("Listening... Speak into the microphone (Ctrl+C to stop).")
         try:
             while True:
+                # Check for inactivity timeout when online
+                now = time.monotonic()
+                if is_online and (now - last_activity_time) >= INACTIVITY_TIMEOUT_SECONDS:
+                    is_online = False
+                    print(
+                        f"[Robot] No speech for {INACTIVITY_TIMEOUT_SECONDS:.0f} seconds. "
+                        "Going OFFLINE. Say 'Hei botti' to wake me up again."
+                    )
+
                 data = audio_queue.get()
-                if recognizer.AcceptWaveform(data):
-                    result_json = recognizer.Result()
-                    result = json.loads(result_json)
-                    text = (result.get("text") or "").strip()
-                    if text:
-                        print(f"You said: {text}")
+                if not recognizer.AcceptWaveform(data):
+                    # Not a complete phrase yet; keep listening.
+                    continue
+
+                result_json = recognizer.Result()
+                result = json.loads(result_json)
+                text = (result.get("text") or "").strip()
+                if not text:
+                    continue
+
+                normalized = text.lower()
+
+                if not is_online:
+                    # OFFLINE mode: only look for the wake word.
+                    if any(w in normalized for w in WAKE_WORDS):
+                        is_online = True
+                        last_activity_time = now
+                        print("[Robot] Wake word detected: going ONLINE and listening.")
+                    # Ignore everything else while offline.
+                    continue
+
+                # ONLINE mode: react to all recognized speech.
+                last_activity_time = now
+                print(f"You said: {text}")
+                # Here is where you would later hook in:
+                # - command parsing
+                # - text-to-speech replies
+                # - motor / servo control
+
         except KeyboardInterrupt:
             print("\nStopping recognition. Goodbye!")
 
