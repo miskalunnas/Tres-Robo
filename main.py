@@ -115,7 +115,7 @@ def listen_forever() -> None:
     with sd.InputStream(
         samplerate=native_sr,
         blocksize=capture_block,
-        device=None,
+        device=0,
         dtype="float32",
         channels=1,
         callback=audio_callback,
