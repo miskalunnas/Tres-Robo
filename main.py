@@ -98,7 +98,9 @@ def recognize_forever() -> None:
                 normalized = text.lower()
 
                 if not is_online:
-                    # OFFLINE mode: stay quiet, only look for the wake word.
+                    # OFFLINE mode: print everything that is heard,
+                    # but only switch to ONLINE when wake word is present.
+                    print(f"[Offline heard] {text}")
                     if any(w in normalized for w in WAKE_WORDS):
                         is_online = True
                         last_activity_time = now
