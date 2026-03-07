@@ -13,8 +13,17 @@ WAKE_WORDS = ["hei botti"]
 # How long (in seconds) of no recognized speech before going back to offline mode.
 INACTIVITY_TIMEOUT_SECONDS = 9.0
 
-# Minimum loudness in dB for audio to be treated as speech.
+# Base minimum loudness in dB for audio to be treated as potentially speech.
 DB_THRESHOLD = 35.0
+
+# How much louder than the estimated noise floor a sound must be
+# (in dB) before we treat it as speech. This makes the threshold adapt
+# automatically to a noisy room.
+NOISE_MARGIN_DB = 10.0
+
+# How quickly the estimated noise floor follows background noise
+# (0.0 = no update, 1.0 = jump immediately to new value).
+NOISE_FLOOR_SMOOTHING = 0.95
 
 # How many seconds of loud audio we collect before sending it to Whisper.
 MIN_CHUNK_SECONDS = 2.0
@@ -82,6 +91,9 @@ def recognize_forever() -> None:
     loud_buffer: list[np.ndarray] = []
     loud_buffer_duration = 0.0
 
+    # Start with a conservative estimate of the background noise floor.
+    noise_floor_db = DB_THRESHOLD - 10.0
+
     # Open an audio stream from the default input device
     with sd.InputStream(
         samplerate=samplerate,
@@ -105,8 +117,24 @@ def recognize_forever() -> None:
 
                 chunk = audio_queue.get()
                 db = compute_db(chunk)
+
+                # Update estimated noise floor using quiet chunks.
                 if db < DB_THRESHOLD:
-                    # Too quiet -> treat as noise, do not accumulate.
+                    noise_floor_db = (
+                        NOISE_FLOOR_SMOOTHING * noise_floor_db
+                        + (1.0 - NOISE_FLOOR_SMOOTHING) * db
+                    )
+                    continue
+
+                # Dynamic speech threshold: at least DB_THRESHOLD,
+                # but also above the current noise floor by NOISE_MARGIN_DB.
+                dynamic_threshold = max(DB_THRESHOLD, noise_floor_db + NOISE_MARGIN_DB)
+                if db < dynamic_threshold:
+                    # Louder than absolute minimum but not enough above noise floor.
+                    noise_floor_db = (
+                        NOISE_FLOOR_SMOOTHING * noise_floor_db
+                        + (1.0 - NOISE_FLOOR_SMOOTHING) * db
+                    )
                     continue
 
                 # Loud enough: accumulate into buffer.
