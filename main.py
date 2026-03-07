@@ -108,10 +108,7 @@ def recognize_forever() -> None:
                 # ONLINE mode: react to all recognized speech and print it.
                 last_activity_time = now
                 print(f"You said: {text}")
-                # Here is where you would later hook in:
-                # - command parsing
-                # - text-to-speech replies
-                # - motor / servo control
+                # Tools (tools.handle_speech) can be hooked here when you want to integrate.
 
         except KeyboardInterrupt:
             print("\nStopping recognition. Goodbye!")
