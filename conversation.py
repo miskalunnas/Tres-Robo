@@ -13,7 +13,7 @@ from voice.tts import speak
 WAKE_WORDS = [
     # Intended wake word + common Whisper mis-transcriptions
     "founderbot",
-    "founderbott"
+    "founderbott",
     "founder bot",
     "found a bot",
     "founder bott",
@@ -27,6 +27,8 @@ INACTIVITY_TIMEOUT = 9.0   # seconds of silence before going offline
 
 
 class ConversationEngine:
+    wake_word = WAKE_WORDS[0]
+
     def __init__(self) -> None:
         self._brain = Brain()
         self._online = False
