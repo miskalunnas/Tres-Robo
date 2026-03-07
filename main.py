@@ -1,47 +1,59 @@
-import json
 import queue
 import sys
 import time
-from pathlib import Path
 
+import numpy as np
 import sounddevice as sd
-import vosk
+from faster_whisper import WhisperModel
 
-
-MODEL_PATH = Path("models/vosk-model-small-en-us-0.15")
 
 # Wake word(s) that will bring the robot online.
 WAKE_WORDS = ["hei botti"]
+
 # How long (in seconds) of no recognized speech before going back to offline mode.
 INACTIVITY_TIMEOUT_SECONDS = 9.0
 
-audio_queue: "queue.Queue[bytes]" = queue.Queue()
+# Minimum loudness in dB for audio to be treated as speech.
+DB_THRESHOLD = 60.0
 
+# How many seconds of loud audio we collect before sending it to Whisper.
+MIN_CHUNK_SECONDS = 2.0
 
-def ensure_model_exists() -> None:
-    """Check that the Vosk model is available locally."""
-    if not MODEL_PATH.exists():
-        print(
-            f"[ERROR] Speech model not found at '{MODEL_PATH}'.\n"
-            "Download an English model from https://alphacephei.com/vosk/models\n"
-            "and extract it so that this folder exists.\n"
-            "Recommended: 'vosk-model-small-en-us-0.15'.",
-            file=sys.stderr,
-        )
-        sys.exit(1)
+audio_queue: "queue.Queue[np.ndarray]" = queue.Queue()
 
 
 def audio_callback(indata, frames, time_info, status) -> None:  # noqa: ARG001
     """Callback from sounddevice whenever new audio data is available."""
     if status:
         print(f"[Audio status] {status}", file=sys.stderr)
-    audio_queue.put(bytes(indata))
+    # Copy to avoid referencing the same buffer.
+    audio_queue.put(indata.copy())
+
+
+def compute_db(chunk: np.ndarray) -> float:
+    """Return approximate loudness of the chunk in dB."""
+    # Ensure mono.
+    if chunk.ndim > 1:
+        chunk = chunk[:, 0]
+    rms = float(np.sqrt(np.mean(np.square(chunk), dtype=np.float64)))
+    if rms <= 0:
+        return -120.0
+    # dB relative to full-scale (float32, range [-1, 1]).
+    return 20.0 * np.log10(rms)
+
+
+def transcribe_chunk(model: WhisperModel, audio: np.ndarray) -> str:
+    """Run Whisper on a mono float32 audio buffer and return the combined text."""
+    if audio.ndim > 1:
+        audio = audio[:, 0]
+    # WhisperModel will handle resampling internally.
+    segments, _ = model.transcribe(audio, language="fi", task="transcribe")
+    text_parts = [seg.text for seg in segments]
+    return "".join(text_parts).strip()
 
 
 def recognize_forever() -> None:
-    """Continuously listen to the microphone with wake-word controlled online/offline modes."""
-    ensure_model_exists()
-
+    """Continuously listen to the microphone with wake-word and dB threshold."""
     # Get default input device info (this should be your wired mic)
     try:
         device_info = sd.query_devices(kind="input")
@@ -55,28 +67,35 @@ def recognize_forever() -> None:
         f"({samplerate} Hz sample rate)"
     )
 
-    print(f"Loading speech model from '{MODEL_PATH}' (this may take a few seconds)...")
-    model = vosk.Model(str(MODEL_PATH))
-    recognizer = vosk.KaldiRecognizer(model, samplerate)
+    print("Loading Whisper model 'tiny' (Finnish)... This may take some time the first run.")
+    model = WhisperModel("tiny", device="cpu", compute_type="int8")
 
     is_online = False
     last_activity_time = time.monotonic()
 
-    print("Robot is OFFLINE. Say 'Hei botti' to wake it up. (Ctrl+C to stop)")
+    print(
+        f"Robot is OFFLINE. Say 'Hei botti' to wake it up. "
+        f"(Ctrl+C to stop, ignoring sounds quieter than {DB_THRESHOLD:.0f} dB)"
+    )
+
+    # Buffer for loud audio that will be sent to Whisper.
+    loud_buffer: list[np.ndarray] = []
+    loud_buffer_duration = 0.0
 
     # Open an audio stream from the default input device
-    with sd.RawInputStream(
+    with sd.InputStream(
         samplerate=samplerate,
-        blocksize=8000,
+        blocksize=1024,
         device=None,  # None = default input device
-        dtype="int16",
+        dtype="float32",
         channels=1,
         callback=audio_callback,
     ):
         try:
             while True:
-                # Check for inactivity timeout when online
                 now = time.monotonic()
+
+                # Check for inactivity timeout when online
                 if is_online and (now - last_activity_time) >= INACTIVITY_TIMEOUT_SECONDS:
                     is_online = False
                     print(
@@ -84,14 +103,26 @@ def recognize_forever() -> None:
                         "Going OFFLINE. Say 'Hei botti' to wake me up again."
                     )
 
-                data = audio_queue.get()
-                if not recognizer.AcceptWaveform(data):
-                    # Not a complete phrase yet; keep listening.
+                chunk = audio_queue.get()
+                db = compute_db(chunk)
+                if db < DB_THRESHOLD:
+                    # Too quiet -> treat as noise, do not accumulate.
                     continue
 
-                result_json = recognizer.Result()
-                result = json.loads(result_json)
-                text = (result.get("text") or "").strip()
+                # Loud enough: accumulate into buffer.
+                loud_buffer.append(chunk)
+                loud_buffer_duration += len(chunk) / float(samplerate)
+
+                if loud_buffer_duration < MIN_CHUNK_SECONDS:
+                    # Not enough audio yet for a full recognition.
+                    continue
+
+                # We have collected enough loud audio -> send to Whisper.
+                audio = np.concatenate(loud_buffer, axis=0)
+                loud_buffer.clear()
+                loud_buffer_duration = 0.0
+
+                text = transcribe_chunk(model, audio)
                 if not text:
                     continue
 
