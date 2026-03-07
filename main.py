@@ -13,6 +13,7 @@ except Exception:  # noqa: BLE001
     nr = None
 
 from conversation import ConversationEngine
+from voice.tts import is_speaking
 
 # Rate expected by webrtcvad and Whisper. Capture may differ — we resample.
 VAD_SAMPLE_RATE = 16_000
@@ -87,19 +88,6 @@ def transcribe(
     return text
 
 
-def _drain_queue() -> None:
-    """Discard audio accumulated while the bot was thinking/speaking."""
-    discarded = 0
-    while not audio_queue.empty():
-        try:
-            audio_queue.get_nowait()
-            discarded += 1
-        except Exception:
-            break
-    if discarded:
-        print(f"[Audio] Drained {discarded} stale frames after speaking.")
-
-
 def listen_forever() -> None:
     # MIC_DEVICE: ALSA device string or sounddevice index for the USB mic.
     # PortAudio sometimes misreports USB capture devices as 0 input channels
@@ -141,6 +129,14 @@ def listen_forever() -> None:
                 if chunk.size == 0:
                     continue
 
+                # Ignore microphone frames while the robot is speaking to avoid
+                # feeding its own voice back into STT. Barge-in can be added later.
+                if is_speaking():
+                    speech_frames.clear()
+                    segment_duration = 0.0
+                    silence_duration = 0.0
+                    continue
+
                 # Mono
                 mono = chunk[:, 0] if chunk.ndim > 1 else chunk
 
@@ -166,7 +162,6 @@ def listen_forever() -> None:
                         segment_duration = 0.0
                         if text:
                             engine.handle(text, now=last_speech_time)
-                            _drain_queue()
 
                 else:
                     if speech_frames:
@@ -176,7 +171,6 @@ def listen_forever() -> None:
                                 text = transcribe(model, speech_frames, native_sr)
                                 if text:
                                     engine.handle(text, now=last_speech_time)
-                                    _drain_queue()
                             speech_frames.clear()
                             segment_duration = 0.0
                             silence_duration = 0.0
