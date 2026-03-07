@@ -36,6 +36,15 @@ MAX_SILENCE_BETWEEN_SPEECH_SECONDS = 0.5
 # each speech segment will be run through noise reduction before Whisper.
 USE_DENOISER = False
 
+# Whisper model size: "tiny" is fastest; "small" is more accurate for Finnish.
+WHISPER_MODEL = "small"
+
+# Initial prompt biases Whisper toward Finnish and English vocabulary.
+WHISPER_PROMPT = (
+    "Founderbot, hei botti, hello, moi, terve, kiitos, ole hyvä, "
+    "what, how, why, yes, no, kyllä, ei."
+)
+
 audio_queue: "queue.Queue[np.ndarray]" = queue.Queue()
 
 
@@ -57,54 +66,14 @@ def transcribe_chunk(model: WhisperModel, audio: np.ndarray) -> str:
             audio = nr.reduce_noise(y=audio, sr=TARGET_SAMPLE_RATE)
         except Exception as exc:  # noqa: BLE001
             print(f"[Denoiser error] {exc}", file=sys.stderr)
-    # WhisperModel will handle resampling internally if needed.
-    segments, _ = model.transcribe(audio, language="fi", task="transcribe")
-    text_parts = [seg.text for seg in segments]
-    return "".join(text_parts).strip()
+    segments, info = model.transcribe(audio, task="transcribe")
+    text = "".join(seg.text for seg in segments).strip()
+    if text:
+        print(f"[Whisper/{info.language}] {text}")
+    return text
 
 
-def float_chunk_to_int16_bytes(chunk: np.ndarray) -> bytes:
-    """Convert a float32 mono chunk in [-1, 1] to 16‑bit PCM bytes."""
-    if chunk.ndim > 1:
-        chunk = chunk[:, 0]
-    int16 = np.clip(chunk * 32767.0, -32768, 32767).astype(np.int16)
-    return int16.tobytes()
-
-
-def process_segment(
-    model: WhisperModel,
-    segment_frames: List[np.ndarray],
-    now: float,
-    is_online: bool,
-    last_activity_time: float,
-) -> tuple[Optional[str], bool, float]:
-    """Concatenate frames, send to Whisper, and update online/offline state."""
-    if not segment_frames:
-        return None, is_online, last_activity_time
-
-    audio = np.concatenate(segment_frames, axis=0)
-    text = transcribe_chunk(model, audio)
-    if not text:
-        return None, is_online, last_activity_time
-
-    normalized = text.lower()
-
-    if not is_online:
-        print(f"[Offline heard] {text}")
-        if any(w in normalized for w in WAKE_WORDS):
-            is_online = True
-            last_activity_time = now
-            print("[Robot] Wake word detected: going ONLINE and listening.")
-    else:
-        last_activity_time = now
-        print(f"You said: {text}")
-
-    return text, is_online, last_activity_time
-
-
-def recognize_forever() -> None:
-    """Continuously listen to the microphone using VAD + Whisper."""
-    # Get default input device info (this should be your wired mic)
+def listen_forever() -> None:
     try:
         device_info = sd.query_devices(kind="input")
     except Exception as exc:  # noqa: BLE001
@@ -117,8 +86,8 @@ def recognize_forever() -> None:
         f"(default {default_samplerate} Hz, capturing at {TARGET_SAMPLE_RATE} Hz)"
     )
 
-    print("Loading Whisper model 'tiny' (Finnish)... This may take some time the first run.")
-    model = WhisperModel("base", device="cpu", compute_type="int8")
+    print("Loading Whisper model 'tiny'... (first run may take a moment)")
+    model = WhisperModel("tiny", device="cpu", compute_type="int8")
 
     # Set up WebRTC VAD.
     vad = webrtcvad.Vad(VAD_AGGRESSIVENESS)

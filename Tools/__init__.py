@@ -38,12 +38,12 @@ def handle_speech(text: str) -> None:
         from tools.music import stop
         stop()
     elif action == "menu_check":
-        from tools.menu import get_menu
+        from tools.menu import get_menu, get_all_menus
         restaurant = cmd.get("restaurant")
         if restaurant:
             response = get_menu(restaurant)
         else:
-            response = "Which restaurant? Options are: Reaktori, Newton, Konehuone, and Hertsi."
+            response = get_all_menus()
     elif action == "tell_time":
         from datetime import datetime
         now = datetime.now().strftime("%H:%M")
