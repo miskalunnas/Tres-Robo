@@ -40,24 +40,14 @@ The code is written in **Python** and is intended to run on your **Raspberry Pi 
    source .venv/bin/activate
    ```
 
-5. **Install Python dependencies**
+5. **Install Python dependencies (Whisper, etc.)**
 
    ```bash
    pip install --upgrade pip
    pip install -r requirements.txt
    ```
 
-6. **Download a Vosk speech model (offline recognition)**
-
-   - Visit `https://alphacephei.com/vosk/models` on your computer or Pi.
-   - Download the English small model: **`vosk-model-small-en-us-0.15`**.
-   - Extract it into a `models` folder inside this project, so you end up with:
-
-     ```text
-     models/vosk-model-small-en-us-0.15/...
-     ```
-
-   The `main.py` script expects the model at exactly that location by default.
+   The first time you run the script, the **Whisper "tiny" model** will be downloaded automatically. It is multilingual, but the code forces the language to **Finnish (`fi`)**.
 
 ## Running the voice recognition script
 
@@ -72,13 +62,12 @@ The code is written in **Python** and is intended to run on your **Raspberry Pi 
 You should see something like:
 
 - Information about the **input device** and sample rate.
-- A message saying it is **listening**.
-- Whenever you speak clearly into the mic, it should print lines like:
-
-```text
-You said: turn left
-You said: hello robot
-```
+- A message that the **Whisper model** is loading.
+- A message that the robot is **OFFLINE** and waiting for the wake word "Hei botti".
+- Whenever you speak clearly **above ~60 dB**, it will be processed by Whisper and printed.
+  - In OFFLINE mode, lines look like: `[Offline heard] ...`
+  - When you say "Hei botti", the robot goes ONLINE.
+  - In ONLINE mode, lines look like: `You said: ...`
 
 ## Next steps
 
