@@ -3,7 +3,6 @@
 Falls back to a print stub if the API key is not set.
 Audio is played through the system default output (Bluetooth speaker).
 """
-import os
 import subprocess
 import sys
 import time
@@ -43,17 +42,15 @@ def speak(text: str) -> None:
 
     try:
         t0 = time.monotonic()
-        # pcm_16000: raw signed-16-bit mono at 16 kHz — no MP3 decode overhead,
-        # smaller per-chunk size, plays directly via aplay.
         audio = client.text_to_speech.convert(
             voice_id=_VOICE_ID,
             text=text,
             model_id="eleven_turbo_v2_5",
-            output_format="pcm_16000",
+            output_format="mp3_44100_128",
         )
-        # Stream raw PCM to paplay (PulseAudio) — reaches Bluetooth speaker.
+        # Stream MP3 to mpg123 via PulseAudio output (required for Bluetooth).
         proc = subprocess.Popen(
-            ["paplay", "--raw", "--rate=16000", "--channels=1", "--format=s16le", "-"],
+            ["mpg123", "-o", "pulse", "-q", "-"],
             stdin=subprocess.PIPE,
         )
         first_chunk = True
