@@ -13,7 +13,7 @@ MODEL_PATH = Path("models/vosk-model-small-en-us-0.15")
 # Wake word(s) that will bring the robot online.
 WAKE_WORDS = ["hei botti"]
 # How long (in seconds) of no recognized speech before going back to offline mode.
-INACTIVITY_TIMEOUT_SECONDS = 7.0
+INACTIVITY_TIMEOUT_SECONDS = 9.0
 
 audio_queue: "queue.Queue[bytes]" = queue.Queue()
 
@@ -98,15 +98,15 @@ def recognize_forever() -> None:
                 normalized = text.lower()
 
                 if not is_online:
-                    # OFFLINE mode: only look for the wake word.
+                    # OFFLINE mode: stay quiet, only look for the wake word.
                     if any(w in normalized for w in WAKE_WORDS):
                         is_online = True
                         last_activity_time = now
                         print("[Robot] Wake word detected: going ONLINE and listening.")
-                    # Ignore everything else while offline.
+                        print("Hey hustlaaja!")
                     continue
 
-                # ONLINE mode: react to all recognized speech.
+                # ONLINE mode: react to all recognized speech and print it.
                 last_activity_time = now
                 print(f"You said: {text}")
                 # Here is where you would later hook in:
