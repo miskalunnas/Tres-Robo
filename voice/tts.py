@@ -51,9 +51,9 @@ def speak(text: str) -> None:
             model_id="eleven_turbo_v2_5",
             output_format="pcm_16000",
         )
-        # Stream raw PCM to aplay — starts playing as soon as first chunk arrives.
+        # Stream raw PCM to paplay (PulseAudio) — reaches Bluetooth speaker.
         proc = subprocess.Popen(
-            ["aplay", "-q", "-f", "S16_LE", "-r", "16000", "-c", "1", "-"],
+            ["paplay", "--raw", "--rate=16000", "--channels=1", "--format=s16le", "-"],
             stdin=subprocess.PIPE,
         )
         first_chunk = True
