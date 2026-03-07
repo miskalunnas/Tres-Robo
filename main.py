@@ -1,6 +1,7 @@
 import queue
 import sys
 import time
+from typing import List, Optional
 
 import numpy as np
 import sounddevice as sd
@@ -12,21 +13,27 @@ try:
 except Exception:  # noqa: BLE001
     nr = None
 
-from conversation import ConversationEngine
 
-# Rate expected by webrtcvad and Whisper. Capture may differ — we resample.
-VAD_SAMPLE_RATE = 16_000
+# Wake word(s) that will bring the robot online.
+WAKE_WORDS = ["founderbot"]
+
+# Target sample rate for both VAD and Whisper input.
+TARGET_SAMPLE_RATE = 48_000
+
+# How long (in seconds) of no recognized speech before going back to offline mode.
+INACTIVITY_TIMEOUT_SECONDS = 9.0
 
 # Voice activity detection settings.
-VAD_FRAME_DURATION_MS = 30   # 10, 20 or 30 ms are valid
-VAD_AGGRESSIVENESS = 2        # 0–3; higher = stricter noise rejection
+VAD_FRAME_DURATION_MS = 30  # 10, 20 or 30 ms are supported by WebRTC VAD
+VAD_AGGRESSIVENESS = 2  # 0–3, higher = more noise rejection
 
-# Segmenting: how much audio to collect before sending to Whisper.
-MIN_SEGMENT_SECONDS = 0.5
-MAX_SEGMENT_SECONDS = 8.0
-MAX_SILENCE_BETWEEN_SPEECH_SECONDS = 0.8
+# Segmenting settings.
+MIN_SEGMENT_SECONDS = 1.0
+MAX_SEGMENT_SECONDS = 5.0
+MAX_SILENCE_BETWEEN_SPEECH_SECONDS = 0.5
 
-# Set True to run noisereduce on each segment before Whisper (adds ~100 ms).
+# Optional denoiser toggle. When True and noisereduce is installed,
+# each speech segment will be run through noise reduction before Whisper.
 USE_DENOISER = False
 
 # Whisper model size: "tiny" is fastest; "small" is more accurate for Finnish.
@@ -42,44 +49,24 @@ audio_queue: "queue.Queue[np.ndarray]" = queue.Queue()
 
 
 def audio_callback(indata, frames, time_info, status) -> None:  # noqa: ARG001
+    """Callback from sounddevice whenever new audio data is available."""
     if status:
         print(f"[Audio status] {status}", file=sys.stderr)
+    # Copy to avoid referencing the same buffer.
     audio_queue.put(indata.copy())
 
 
-def resample(audio: np.ndarray, from_sr: int, to_sr: int) -> np.ndarray:
-    """Linear resample mono float32 array from from_sr to to_sr."""
-    if from_sr == to_sr:
-        return audio
-    target_len = int(len(audio) * to_sr / from_sr)
-    return np.interp(
-        np.linspace(0, len(audio) - 1, target_len),
-        np.arange(len(audio)),
-        audio,
-    ).astype(np.float32)
-
-
-def float_to_int16_bytes(chunk: np.ndarray) -> bytes:
-    """Convert float32 mono chunk to 16-bit PCM bytes for VAD."""
-    return np.clip(chunk * 32767.0, -32768, 32767).astype(np.int16).tobytes()
-
-
-def transcribe(
-    model: WhisperModel,
-    frames: list[np.ndarray],
-    native_sr: int,
-) -> str:
-    """Concatenate frames, resample to 16 kHz, optionally denoise, then Whisper."""
-    audio = np.concatenate(frames, axis=0)
+def transcribe_chunk(model: WhisperModel, audio: np.ndarray) -> str:
+    """Run Whisper on a mono float32 audio buffer and return the combined text."""
     if audio.ndim > 1:
         audio = audio[:, 0]
-    audio = resample(audio, native_sr, VAD_SAMPLE_RATE)
-    if USE_DENOISER and nr is not None:
+    # Optionally apply denoising.
+    if USE_DENOISER and nr is not None and audio.size > 0:
         try:
-            audio = nr.reduce_noise(y=audio, sr=VAD_SAMPLE_RATE)
+            audio = nr.reduce_noise(y=audio, sr=TARGET_SAMPLE_RATE)
         except Exception as exc:  # noqa: BLE001
             print(f"[Denoiser error] {exc}", file=sys.stderr)
-    segments, info = model.transcribe(audio, task="transcribe", initial_prompt=WHISPER_PROMPT)
+    segments, info = model.transcribe(audio, task="transcribe")
     text = "".join(seg.text for seg in segments).strip()
     if text:
         print(f"[Whisper/{info.language}] {text}")
@@ -93,80 +80,97 @@ def listen_forever() -> None:
         print(f"[ERROR] Could not query audio devices: {exc}", file=sys.stderr)
         sys.exit(1)
 
-    native_sr = int(device_info["default_samplerate"])
-    print(f"[Mic] {device_info['name']} — native {native_sr} Hz, VAD/Whisper at {VAD_SAMPLE_RATE} Hz")
+    default_samplerate = int(device_info["default_samplerate"])
+    print(
+        f"Using input device: {device_info['name']} "
+        f"(default {default_samplerate} Hz, capturing at {TARGET_SAMPLE_RATE} Hz)"
+    )
 
-    print(f"Loading Whisper model '{WHISPER_MODEL}'... (first run may take a moment)")
-    model = WhisperModel(WHISPER_MODEL, device="cpu", compute_type="int8")
+    print("Loading Whisper model 'tiny'... (first run may take a moment)")
+    model = WhisperModel("tiny", device="cpu", compute_type="int8")
 
+    # Set up WebRTC VAD.
     vad = webrtcvad.Vad(VAD_AGGRESSIVENESS)
+    frame_length = int(TARGET_SAMPLE_RATE * VAD_FRAME_DURATION_MS / 1000)
 
-    # Capture one VAD frame worth of audio per callback (30 ms at native rate).
-    capture_block = int(native_sr * VAD_FRAME_DURATION_MS / 1000)
-    frame_seconds = VAD_FRAME_DURATION_MS / 1000.0
-    # Pre-compute the expected 16 kHz frame length for VAD.
-    vad_frame_len = int(VAD_SAMPLE_RATE * VAD_FRAME_DURATION_MS / 1000)
+    is_online = False
+    last_activity_time = time.monotonic()
 
-    engine = ConversationEngine()
+    print("Robot is OFFLINE. Say 'founderbot' to wake it up. (Ctrl+C to stop)")
 
+    # Buffers for current speech segment.
     speech_frames: list[np.ndarray] = []
     segment_duration = 0.0
-    silence_duration = 0.0
+    silence_during_segment = 0.0
 
+    # Open an audio stream from the default input device
     with sd.InputStream(
-        samplerate=native_sr,
-        blocksize=capture_block,
-        device=None,
+        samplerate=TARGET_SAMPLE_RATE,
+        blocksize=frame_length,
+        device=None,  # None = default input device
         dtype="float32",
         channels=1,
         callback=audio_callback,
     ):
         try:
             while True:
+                now = time.monotonic()
+
+                # Check for inactivity timeout when online
+                if is_online and (now - last_activity_time) >= INACTIVITY_TIMEOUT_SECONDS:
+                    is_online = False
+                    print(
+                        f"[Robot] No speech for {INACTIVITY_TIMEOUT_SECONDS:.0f} seconds. "
+                        "Going OFFLINE. Say 'founderbot' to wake me up again."
+                    )
+
                 chunk = audio_queue.get()
                 if chunk.size == 0:
                     continue
 
-                # Mono
-                mono = chunk[:, 0] if chunk.ndim > 1 else chunk
-
-                # Resample chunk to 16 kHz for VAD
-                mono_16k = resample(mono, native_sr, VAD_SAMPLE_RATE)
-                # Trim/pad to exact VAD frame size
-                if len(mono_16k) > vad_frame_len:
-                    mono_16k = mono_16k[:vad_frame_len]
-                elif len(mono_16k) < vad_frame_len:
-                    mono_16k = np.pad(mono_16k, (0, vad_frame_len - len(mono_16k)))
-
-                is_speech = vad.is_speech(float_to_int16_bytes(mono_16k), VAD_SAMPLE_RATE)
+                pcm_bytes = float_chunk_to_int16_bytes(chunk)
+                is_speech = vad.is_speech(pcm_bytes, TARGET_SAMPLE_RATE)
+                frame_seconds = len(chunk) / float(TARGET_SAMPLE_RATE)
 
                 if is_speech:
-                    speech_frames.append(mono)  # store native-rate audio
+                    speech_frames.append(chunk)
                     segment_duration += frame_seconds
-                    silence_duration = 0.0
+                    silence_during_segment = 0.0
 
                     if segment_duration >= MAX_SEGMENT_SECONDS:
-                        text = transcribe(model, speech_frames, native_sr)
+                        _, is_online, last_activity_time = process_segment(
+                            model,
+                            speech_frames,
+                            now,
+                            is_online,
+                            last_activity_time,
+                        )
                         speech_frames.clear()
                         segment_duration = 0.0
-                        if text:
-                            engine.handle(text, now=time.monotonic())
-
+                        silence_during_segment = 0.0
                 else:
                     if speech_frames:
-                        silence_duration += frame_seconds
-                        if silence_duration >= MAX_SILENCE_BETWEEN_SPEECH_SECONDS:
+                        silence_during_segment += frame_seconds
+                        if (
+                            silence_during_segment >= MAX_SILENCE_BETWEEN_SPEECH_SECONDS
+                            or segment_duration >= MAX_SEGMENT_SECONDS
+                        ):
                             if segment_duration >= MIN_SEGMENT_SECONDS:
-                                text = transcribe(model, speech_frames, native_sr)
-                                if text:
-                                    engine.handle(text, now=time.monotonic())
+                                _, is_online, last_activity_time = process_segment(
+                                    model,
+                                    speech_frames,
+                                    now,
+                                    is_online,
+                                    last_activity_time,
+                                )
                             speech_frames.clear()
                             segment_duration = 0.0
-                            silence_duration = 0.0
+                            silence_during_segment = 0.0
 
         except KeyboardInterrupt:
-            print("\nStopping. Goodbye!")
+            print("\nStopping recognition. Goodbye!")
 
 
 if __name__ == "__main__":
-    listen_forever()
+    recognize_forever()
+
