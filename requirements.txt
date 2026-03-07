@@ -5,4 +5,4 @@ webrtcvad
 noisereduce
 opencv-python
 face_recognition
-
+yt-dlp
