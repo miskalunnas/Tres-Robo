@@ -30,8 +30,7 @@ MAX_SILENCE_BETWEEN_SPEECH_SECONDS = 0.8
 USE_DENOISER = False
 
 # Whisper model size: "tiny" is fastest; "small" is more accurate for Finnish.
-WHISPER_MODEL = "small"
-
+WHISPER_MODEL="base"
 # Initial prompt biases Whisper toward Finnish and English vocabulary.
 WHISPER_PROMPT = (
     "Founderbot, hei botti, hello, moi, terve, kiitos, ole hyvä, "
@@ -171,4 +170,3 @@ def listen_forever() -> None:
 
 if __name__ == "__main__":
     listen_forever()
-    
