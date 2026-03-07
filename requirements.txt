@@ -4,5 +4,7 @@ faster-whisper
 webrtcvad
 noisereduce
 opencv-python
-face_recognition
+deepface
+openai
+python-dotenv
 yt-dlp
