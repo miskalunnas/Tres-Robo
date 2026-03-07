@@ -86,25 +86,12 @@ def transcribe(
 
 
 def listen_forever() -> None:
-    # MIC_DEVICE: set to the integer index of your USB microphone.
-    # Run: python -c "import sounddevice as sd; print(sd.query_devices())"
-    # to list devices, then set the index of the one with input channels.
-    MIC_DEVICE = 0
-
-    try:
-        device_info = sd.query_devices(MIC_DEVICE)
-    except Exception as exc:  # noqa: BLE001
-        print(f"[ERROR] Could not query audio devices: {exc}", file=sys.stderr)
-        sys.exit(1)
-
-    if device_info["max_input_channels"] == 0:
-        print(f"[ERROR] Device {MIC_DEVICE} '{device_info['name']}' has no input channels.", file=sys.stderr)
-        print("Available devices:", file=sys.stderr)
-        print(sd.query_devices(), file=sys.stderr)
-        sys.exit(1)
-
-    native_sr = int(device_info["default_samplerate"])
-    print(f"[Mic] {device_info['name']} — native {native_sr} Hz, VAD/Whisper at {VAD_SAMPLE_RATE} Hz")
+    # MIC_DEVICE: ALSA device string or sounddevice index for the USB mic.
+    # PortAudio sometimes misreports USB capture devices as 0 input channels
+    # even when arecord confirms they work. Using the ALSA hw string bypasses this.
+    MIC_DEVICE = "hw:2,0"
+    native_sr = 48_000  # confirmed via sd.query_devices()
+    print(f"[Mic] {MIC_DEVICE} — native {native_sr} Hz, VAD/Whisper at {VAD_SAMPLE_RATE} Hz")
 
     print(f"Loading Whisper model '{WHISPER_MODEL}'... (first run may take a moment)")
     model = WhisperModel(WHISPER_MODEL, device="cpu", compute_type="int8")
