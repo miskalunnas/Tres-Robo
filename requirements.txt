@@ -1,5 +1,4 @@
 sounddevice
-vosk
-openai
-python-dotenv
+numpy
+faster-whisper
 
