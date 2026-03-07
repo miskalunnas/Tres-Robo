@@ -1,6 +1,8 @@
 sounddevice
 numpy
 faster-whisper
+webrtcvad
+noisereduce
 opencv-python
 face_recognition
 

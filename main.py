@@ -1,32 +1,40 @@
 import queue
 import sys
 import time
+from typing import List, Optional
 
 import numpy as np
 import sounddevice as sd
+import webrtcvad
 from faster_whisper import WhisperModel
+
+try:
+    import noisereduce as nr
+except Exception:  # noqa: BLE001
+    nr = None
 
 
 # Wake word(s) that will bring the robot online.
 WAKE_WORDS = ["hei botti"]
 
+# Target sample rate for both VAD and Whisper input.
+TARGET_SAMPLE_RATE = 16_000
+
 # How long (in seconds) of no recognized speech before going back to offline mode.
 INACTIVITY_TIMEOUT_SECONDS = 9.0
 
-# Base minimum loudness in dB for audio to be treated as potentially speech.
-DB_THRESHOLD = 35.0
+# Voice activity detection settings.
+VAD_FRAME_DURATION_MS = 30  # 10, 20 or 30 ms are supported by WebRTC VAD
+VAD_AGGRESSIVENESS = 2  # 0–3, higher = more noise rejection
 
-# How much louder than the estimated noise floor a sound must be
-# (in dB) before we treat it as speech. This makes the threshold adapt
-# automatically to a noisy room.
-NOISE_MARGIN_DB = 10.0
+# Segmenting settings.
+MIN_SEGMENT_SECONDS = 1.0
+MAX_SEGMENT_SECONDS = 5.0
+MAX_SILENCE_BETWEEN_SPEECH_SECONDS = 0.5
 
-# How quickly the estimated noise floor follows background noise
-# (0.0 = no update, 1.0 = jump immediately to new value).
-NOISE_FLOOR_SMOOTHING = 0.95
-
-# How many seconds of loud audio we collect before sending it to Whisper.
-MIN_CHUNK_SECONDS = 2.0
+# Optional denoiser toggle. When True and noisereduce is installed,
+# each speech segment will be run through noise reduction before Whisper.
+USE_DENOISER = False
 
 audio_queue: "queue.Queue[np.ndarray]" = queue.Queue()
 
@@ -39,30 +47,63 @@ def audio_callback(indata, frames, time_info, status) -> None:  # noqa: ARG001
     audio_queue.put(indata.copy())
 
 
-def compute_db(chunk: np.ndarray) -> float:
-    """Return approximate loudness of the chunk in dB."""
-    # Ensure mono.
-    if chunk.ndim > 1:
-        chunk = chunk[:, 0]
-    rms = float(np.sqrt(np.mean(np.square(chunk), dtype=np.float64)))
-    if rms <= 0:
-        return -120.0
-    # dB relative to full-scale (float32, range [-1, 1]).
-    return 20.0 * np.log10(rms)
-
-
 def transcribe_chunk(model: WhisperModel, audio: np.ndarray) -> str:
     """Run Whisper on a mono float32 audio buffer and return the combined text."""
     if audio.ndim > 1:
         audio = audio[:, 0]
-    # WhisperModel will handle resampling internally.
+    # Optionally apply denoising.
+    if USE_DENOISER and nr is not None and audio.size > 0:
+        try:
+            audio = nr.reduce_noise(y=audio, sr=TARGET_SAMPLE_RATE)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[Denoiser error] {exc}", file=sys.stderr)
+    # WhisperModel will handle resampling internally if needed.
     segments, _ = model.transcribe(audio, language="fi", task="transcribe")
     text_parts = [seg.text for seg in segments]
     return "".join(text_parts).strip()
 
 
+def float_chunk_to_int16_bytes(chunk: np.ndarray) -> bytes:
+    """Convert a float32 mono chunk in [-1, 1] to 16‑bit PCM bytes."""
+    if chunk.ndim > 1:
+        chunk = chunk[:, 0]
+    int16 = np.clip(chunk * 32767.0, -32768, 32767).astype(np.int16)
+    return int16.tobytes()
+
+
+def process_segment(
+    model: WhisperModel,
+    segment_frames: List[np.ndarray],
+    now: float,
+    is_online: bool,
+    last_activity_time: float,
+) -> tuple[Optional[str], bool, float]:
+    """Concatenate frames, send to Whisper, and update online/offline state."""
+    if not segment_frames:
+        return None, is_online, last_activity_time
+
+    audio = np.concatenate(segment_frames, axis=0)
+    text = transcribe_chunk(model, audio)
+    if not text:
+        return None, is_online, last_activity_time
+
+    normalized = text.lower()
+
+    if not is_online:
+        print(f"[Offline heard] {text}")
+        if any(w in normalized for w in WAKE_WORDS):
+            is_online = True
+            last_activity_time = now
+            print("[Robot] Wake word detected: going ONLINE and listening.")
+    else:
+        last_activity_time = now
+        print(f"You said: {text}")
+
+    return text, is_online, last_activity_time
+
+
 def recognize_forever() -> None:
-    """Continuously listen to the microphone with wake-word and dB threshold."""
+    """Continuously listen to the microphone using VAD + Whisper."""
     # Get default input device info (this should be your wired mic)
     try:
         device_info = sd.query_devices(kind="input")
@@ -70,34 +111,33 @@ def recognize_forever() -> None:
         print(f"[ERROR] Could not query audio devices: {exc}", file=sys.stderr)
         sys.exit(1)
 
-    samplerate = int(device_info["default_samplerate"])
+    default_samplerate = int(device_info["default_samplerate"])
     print(
         f"Using input device: {device_info['name']} "
-        f"({samplerate} Hz sample rate)"
+        f"(default {default_samplerate} Hz, capturing at {TARGET_SAMPLE_RATE} Hz)"
     )
 
     print("Loading Whisper model 'tiny' (Finnish)... This may take some time the first run.")
     model = WhisperModel("tiny", device="cpu", compute_type="int8")
 
+    # Set up WebRTC VAD.
+    vad = webrtcvad.Vad(VAD_AGGRESSIVENESS)
+    frame_length = int(TARGET_SAMPLE_RATE * VAD_FRAME_DURATION_MS / 1000)
+
     is_online = False
     last_activity_time = time.monotonic()
 
-    print(
-        f"Robot is OFFLINE. Say 'Hei botti' to wake it up. "
-        f"(Ctrl+C to stop, ignoring sounds quieter than {DB_THRESHOLD:.0f} dB)"
-    )
+    print("Robot is OFFLINE. Say 'Hei botti' to wake it up. (Ctrl+C to stop)")
 
-    # Buffer for loud audio that will be sent to Whisper.
-    loud_buffer: list[np.ndarray] = []
-    loud_buffer_duration = 0.0
-
-    # Start with a conservative estimate of the background noise floor.
-    noise_floor_db = DB_THRESHOLD - 10.0
+    # Buffers for current speech segment.
+    speech_frames: list[np.ndarray] = []
+    segment_duration = 0.0
+    silence_during_segment = 0.0
 
     # Open an audio stream from the default input device
     with sd.InputStream(
-        samplerate=samplerate,
-        blocksize=1024,
+        samplerate=TARGET_SAMPLE_RATE,
+        blocksize=frame_length,
         device=None,  # None = default input device
         dtype="float32",
         channels=1,
@@ -116,63 +156,47 @@ def recognize_forever() -> None:
                     )
 
                 chunk = audio_queue.get()
-                db = compute_db(chunk)
-
-                # Update estimated noise floor using quiet chunks.
-                if db < DB_THRESHOLD:
-                    noise_floor_db = (
-                        NOISE_FLOOR_SMOOTHING * noise_floor_db
-                        + (1.0 - NOISE_FLOOR_SMOOTHING) * db
-                    )
+                if chunk.size == 0:
                     continue
 
-                # Dynamic speech threshold: at least DB_THRESHOLD,
-                # but also above the current noise floor by NOISE_MARGIN_DB.
-                dynamic_threshold = max(DB_THRESHOLD, noise_floor_db + NOISE_MARGIN_DB)
-                if db < dynamic_threshold:
-                    # Louder than absolute minimum but not enough above noise floor.
-                    noise_floor_db = (
-                        NOISE_FLOOR_SMOOTHING * noise_floor_db
-                        + (1.0 - NOISE_FLOOR_SMOOTHING) * db
-                    )
-                    continue
+                pcm_bytes = float_chunk_to_int16_bytes(chunk)
+                is_speech = vad.is_speech(pcm_bytes, TARGET_SAMPLE_RATE)
+                frame_seconds = len(chunk) / float(TARGET_SAMPLE_RATE)
 
-                # Loud enough: accumulate into buffer.
-                loud_buffer.append(chunk)
-                loud_buffer_duration += len(chunk) / float(samplerate)
+                if is_speech:
+                    speech_frames.append(chunk)
+                    segment_duration += frame_seconds
+                    silence_during_segment = 0.0
 
-                if loud_buffer_duration < MIN_CHUNK_SECONDS:
-                    # Not enough audio yet for a full recognition.
-                    continue
-
-                # We have collected enough loud audio -> send to Whisper.
-                audio = np.concatenate(loud_buffer, axis=0)
-                loud_buffer.clear()
-                loud_buffer_duration = 0.0
-
-                text = transcribe_chunk(model, audio)
-                if not text:
-                    continue
-
-                normalized = text.lower()
-
-                if not is_online:
-                    # OFFLINE mode: print everything that is heard,
-                    # but only switch to ONLINE when wake word is present.
-                    print(f"[Offline heard] {text}")
-                    if any(w in normalized for w in WAKE_WORDS):
-                        is_online = True
-                        last_activity_time = now
-                        print("[Robot] Wake word detected: going ONLINE and listening.")
-                    continue
-
-                # ONLINE mode: react to all recognized speech and print it.
-                last_activity_time = now
-                print(f"You said: {text}")
-                # Here is where you would later hook in:
-                # - command parsing
-                # - text-to-speech replies
-                # - motor / servo control
+                    if segment_duration >= MAX_SEGMENT_SECONDS:
+                        _, is_online, last_activity_time = process_segment(
+                            model,
+                            speech_frames,
+                            now,
+                            is_online,
+                            last_activity_time,
+                        )
+                        speech_frames.clear()
+                        segment_duration = 0.0
+                        silence_during_segment = 0.0
+                else:
+                    if speech_frames:
+                        silence_during_segment += frame_seconds
+                        if (
+                            silence_during_segment >= MAX_SILENCE_BETWEEN_SPEECH_SECONDS
+                            or segment_duration >= MAX_SEGMENT_SECONDS
+                        ):
+                            if segment_duration >= MIN_SEGMENT_SECONDS:
+                                _, is_online, last_activity_time = process_segment(
+                                    model,
+                                    speech_frames,
+                                    now,
+                                    is_online,
+                                    last_activity_time,
+                                )
+                            speech_frames.clear()
+                            segment_duration = 0.0
+                            silence_during_segment = 0.0
 
         except KeyboardInterrupt:
             print("\nStopping recognition. Goodbye!")

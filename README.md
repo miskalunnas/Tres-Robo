@@ -40,7 +40,7 @@ The code is written in **Python** and is intended to run on your **Raspberry Pi 
    source .venv/bin/activate
    ```
 
-5. **Install Python dependencies (Whisper, etc.)**
+5. **Install Python dependencies (Whisper, VAD, etc.)**
 
    ```bash
    pip install --upgrade pip
@@ -64,11 +64,16 @@ You should see something like:
 - Information about the **input device** and sample rate.
 - A message that the **Whisper model** is loading.
 - A message that the robot is **OFFLINE** and waiting for the wake word "Hei botti".
-- Whenever you speak clearly **above ~60 dB**, it will be processed by Whisper and printed.
-  - In OFFLINE mode, lines look like: `[Offline heard] ...`
+- As you speak, the audio is first filtered by **WebRTC VAD** (voice activity detection) to ignore pure background noise, then sent in small segments to Whisper.
+  - In OFFLINE mode, recognized speech segments are printed as: `[Offline heard] ...` and are only used to detect the wake word.
   - When you say "Hei botti", the robot goes ONLINE.
-  - In ONLINE mode, lines look like: `You said: ...`
+  - In ONLINE mode, segments are printed as: `You said: ...`
 
+### Noise handling
+
+- The microphone stream is filtered by **WebRTC VAD** (`webrtcvad`), which tries to keep only speech and drop pure noise.
+- There is also an **optional denoiser** (`noisereduce`) wired into the code. It is disabled by default for performance reasons; you can enable it by setting `USE_DENOISER = True` in `main.py` if you want more aggressive noise reduction.\
+  
 ## Next steps
 
 - Connect the recognized text (e.g. "turn left", "look up", "blink") to **motor control** or other actions for your robot head.
