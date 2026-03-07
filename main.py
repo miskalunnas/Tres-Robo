@@ -1,47 +1,109 @@
-import json
 import queue
 import sys
 import time
-from pathlib import Path
+from typing import List, Optional
 
+import numpy as np
 import sounddevice as sd
-import vosk
+import webrtcvad
+from faster_whisper import WhisperModel
 
+try:
+    import noisereduce as nr
+except Exception:  # noqa: BLE001
+    nr = None
 
-MODEL_PATH = Path("models/vosk-model-small-en-us-0.15")
 
 # Wake word(s) that will bring the robot online.
-WAKE_WORDS = ["hei botti"]
+WAKE_WORDS = ["founderbot"]
+
+# Target sample rate for both VAD and Whisper input.
+TARGET_SAMPLE_RATE = 16_000
+
 # How long (in seconds) of no recognized speech before going back to offline mode.
 INACTIVITY_TIMEOUT_SECONDS = 9.0
 
-audio_queue: "queue.Queue[bytes]" = queue.Queue()
+# Voice activity detection settings.
+VAD_FRAME_DURATION_MS = 30  # 10, 20 or 30 ms are supported by WebRTC VAD
+VAD_AGGRESSIVENESS = 2  # 0–3, higher = more noise rejection
 
+# Segmenting settings.
+MIN_SEGMENT_SECONDS = 1.0
+MAX_SEGMENT_SECONDS = 5.0
+MAX_SILENCE_BETWEEN_SPEECH_SECONDS = 0.5
 
-def ensure_model_exists() -> None:
-    """Check that the Vosk model is available locally."""
-    if not MODEL_PATH.exists():
-        print(
-            f"[ERROR] Speech model not found at '{MODEL_PATH}'.\n"
-            "Download an English model from https://alphacephei.com/vosk/models\n"
-            "and extract it so that this folder exists.\n"
-            "Recommended: 'vosk-model-small-en-us-0.15'.",
-            file=sys.stderr,
-        )
-        sys.exit(1)
+# Optional denoiser toggle. When True and noisereduce is installed,
+# each speech segment will be run through noise reduction before Whisper.
+USE_DENOISER = False
+
+audio_queue: "queue.Queue[np.ndarray]" = queue.Queue()
 
 
 def audio_callback(indata, frames, time_info, status) -> None:  # noqa: ARG001
     """Callback from sounddevice whenever new audio data is available."""
     if status:
         print(f"[Audio status] {status}", file=sys.stderr)
-    audio_queue.put(bytes(indata))
+    # Copy to avoid referencing the same buffer.
+    audio_queue.put(indata.copy())
+
+
+def transcribe_chunk(model: WhisperModel, audio: np.ndarray) -> str:
+    """Run Whisper on a mono float32 audio buffer and return the combined text."""
+    if audio.ndim > 1:
+        audio = audio[:, 0]
+    # Optionally apply denoising.
+    if USE_DENOISER and nr is not None and audio.size > 0:
+        try:
+            audio = nr.reduce_noise(y=audio, sr=TARGET_SAMPLE_RATE)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[Denoiser error] {exc}", file=sys.stderr)
+    # WhisperModel will handle resampling internally if needed.
+    segments, _ = model.transcribe(audio, language="fi", task="transcribe")
+    text_parts = [seg.text for seg in segments]
+    return "".join(text_parts).strip()
+
+
+def float_chunk_to_int16_bytes(chunk: np.ndarray) -> bytes:
+    """Convert a float32 mono chunk in [-1, 1] to 16‑bit PCM bytes."""
+    if chunk.ndim > 1:
+        chunk = chunk[:, 0]
+    int16 = np.clip(chunk * 32767.0, -32768, 32767).astype(np.int16)
+    return int16.tobytes()
+
+
+def process_segment(
+    model: WhisperModel,
+    segment_frames: List[np.ndarray],
+    now: float,
+    is_online: bool,
+    last_activity_time: float,
+) -> tuple[Optional[str], bool, float]:
+    """Concatenate frames, send to Whisper, and update online/offline state."""
+    if not segment_frames:
+        return None, is_online, last_activity_time
+
+    audio = np.concatenate(segment_frames, axis=0)
+    text = transcribe_chunk(model, audio)
+    if not text:
+        return None, is_online, last_activity_time
+
+    normalized = text.lower()
+
+    if not is_online:
+        print(f"[Offline heard] {text}")
+        if any(w in normalized for w in WAKE_WORDS):
+            is_online = True
+            last_activity_time = now
+            print("[Robot] Wake word detected: going ONLINE and listening.")
+    else:
+        last_activity_time = now
+        print(f"You said: {text}")
+
+    return text, is_online, last_activity_time
 
 
 def recognize_forever() -> None:
-    """Continuously listen to the microphone with wake-word controlled online/offline modes."""
-    ensure_model_exists()
-
+    """Continuously listen to the microphone using VAD + Whisper."""
     # Get default input device info (this should be your wired mic)
     try:
         device_info = sd.query_devices(kind="input")
@@ -49,66 +111,92 @@ def recognize_forever() -> None:
         print(f"[ERROR] Could not query audio devices: {exc}", file=sys.stderr)
         sys.exit(1)
 
-    samplerate = int(device_info["default_samplerate"])
+    default_samplerate = int(device_info["default_samplerate"])
     print(
         f"Using input device: {device_info['name']} "
-        f"({samplerate} Hz sample rate)"
+        f"(default {default_samplerate} Hz, capturing at {TARGET_SAMPLE_RATE} Hz)"
     )
 
-    print(f"Loading speech model from '{MODEL_PATH}' (this may take a few seconds)...")
-    model = vosk.Model(str(MODEL_PATH))
-    recognizer = vosk.KaldiRecognizer(model, samplerate)
+    print("Loading Whisper model 'tiny' (Finnish)... This may take some time the first run.")
+    model = WhisperModel("tiny", device="cpu", compute_type="int8")
+
+    # Set up WebRTC VAD.
+    vad = webrtcvad.Vad(VAD_AGGRESSIVENESS)
+    frame_length = int(TARGET_SAMPLE_RATE * VAD_FRAME_DURATION_MS / 1000)
 
     is_online = False
     last_activity_time = time.monotonic()
 
-    print("Robot is OFFLINE. Say 'Hei botti' to wake it up. (Ctrl+C to stop)")
+    print("Robot is OFFLINE. Say 'founderbot' to wake it up. (Ctrl+C to stop)")
+
+    # Buffers for current speech segment.
+    speech_frames: list[np.ndarray] = []
+    segment_duration = 0.0
+    silence_during_segment = 0.0
 
     # Open an audio stream from the default input device
-    with sd.RawInputStream(
-        samplerate=samplerate,
-        blocksize=8000,
+    with sd.InputStream(
+        samplerate=TARGET_SAMPLE_RATE,
+        blocksize=frame_length,
         device=None,  # None = default input device
-        dtype="int16",
+        dtype="float32",
         channels=1,
         callback=audio_callback,
     ):
         try:
             while True:
-                # Check for inactivity timeout when online
                 now = time.monotonic()
+
+                # Check for inactivity timeout when online
                 if is_online and (now - last_activity_time) >= INACTIVITY_TIMEOUT_SECONDS:
                     is_online = False
                     print(
                         f"[Robot] No speech for {INACTIVITY_TIMEOUT_SECONDS:.0f} seconds. "
-                        "Going OFFLINE. Say 'Hei botti' to wake me up again."
+                        "Going OFFLINE. Say 'founderbot' to wake me up again."
                     )
 
-                data = audio_queue.get()
-                if not recognizer.AcceptWaveform(data):
-                    # Not a complete phrase yet; keep listening.
+                chunk = audio_queue.get()
+                if chunk.size == 0:
                     continue
 
-                result_json = recognizer.Result()
-                result = json.loads(result_json)
-                text = (result.get("text") or "").strip()
-                if not text:
-                    continue
+                pcm_bytes = float_chunk_to_int16_bytes(chunk)
+                is_speech = vad.is_speech(pcm_bytes, TARGET_SAMPLE_RATE)
+                frame_seconds = len(chunk) / float(TARGET_SAMPLE_RATE)
 
-                normalized = text.lower()
+                if is_speech:
+                    speech_frames.append(chunk)
+                    segment_duration += frame_seconds
+                    silence_during_segment = 0.0
 
-                if not is_online:
-                    # OFFLINE mode: stay quiet, only look for the wake word.
-                    if any(w in normalized for w in WAKE_WORDS):
-                        is_online = True
-                        last_activity_time = now
-                        print("[Robot] Wake word detected: going ONLINE and listening.")
-                    continue
-
-                # ONLINE mode: react to all recognized speech and print it.
-                last_activity_time = now
-                print(f"You said: {text}")
-                # Tools (tools.handle_speech) can be hooked here when you want to integrate.
+                    if segment_duration >= MAX_SEGMENT_SECONDS:
+                        _, is_online, last_activity_time = process_segment(
+                            model,
+                            speech_frames,
+                            now,
+                            is_online,
+                            last_activity_time,
+                        )
+                        speech_frames.clear()
+                        segment_duration = 0.0
+                        silence_during_segment = 0.0
+                else:
+                    if speech_frames:
+                        silence_during_segment += frame_seconds
+                        if (
+                            silence_during_segment >= MAX_SILENCE_BETWEEN_SPEECH_SECONDS
+                            or segment_duration >= MAX_SEGMENT_SECONDS
+                        ):
+                            if segment_duration >= MIN_SEGMENT_SECONDS:
+                                _, is_online, last_activity_time = process_segment(
+                                    model,
+                                    speech_frames,
+                                    now,
+                                    is_online,
+                                    last_activity_time,
+                                )
+                            speech_frames.clear()
+                            segment_duration = 0.0
+                            silence_during_segment = 0.0
 
         except KeyboardInterrupt:
             print("\nStopping recognition. Goodbye!")
