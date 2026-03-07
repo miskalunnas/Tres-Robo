@@ -103,7 +103,6 @@ def recognize_forever() -> None:
                         is_online = True
                         last_activity_time = now
                         print("[Robot] Wake word detected: going ONLINE and listening.")
-                        print("Hey hustlaaja!")
                     continue
 
                 # ONLINE mode: react to all recognized speech and print it.
