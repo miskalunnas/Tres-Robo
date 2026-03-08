@@ -24,7 +24,8 @@ When the bot gets interrupted too easily by background noise or short sounds, tu
    - Echo overlap: `_text_looks_like_echo` uses 0.45; raise to 0.5–0.55 to reject more of the bot’s own speech picked up by mic.
 
 2. **main.py** – Interrupt capture:
-   - `INTERRUPT_MIN_SEGMENT_SECONDS` (1.0): minimum speech before interrupt is sent. Increase to 1.2–1.5s.
+   - `INTERRUPT_MIN_SEGMENT_SECONDS` (1.8): minimum speech before interrupt is sent.
+   - `MIN_SEGMENT_WHEN_MUSIC_PLAYING` (1.2): when music plays, require longer speech before processing.
 
 3. **main.py** – VAD:
    - `VAD_AGGRESSIVENESS` (1): 0=herkimmin, 3=vahvin. Try 2 to reduce noise as speech.

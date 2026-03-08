@@ -37,12 +37,15 @@ VAD_FRAME_DURATION_MS = 30
 # Pienempi MIN = lyhyet herätyssanat ("hei bot", "founderbot") pääsevät Whisperiin.
 MIN_SEGMENT_SECONDS = 0.5
 MAX_SEGMENT_SECONDS = 8.0
+# Kun musiikki soi: korkeampi kynnys = botti ei keskeytä musiikkia lyhyellä puheella.
+MIN_SEGMENT_WHEN_MUSIC_PLAYING = 1.2
 # Hiljaisuus ennen kuin lähetetään Whisperille: isompi = botti ei puhu päälle, pienempi = nopeampi vastaus.
 MAX_SILENCE_BETWEEN_SPEECH_SECONDS = 0.9
 
-# Interruption capture: korkeampi kynnys = botti ei keskeydy taustamelusta tai lyhyistä äänistä.
-INTERRUPT_MIN_SEGMENT_SECONDS = 1.2
-INTERRUPT_MAX_SEGMENT_SECONDS = 3.0
+# Interruption capture: botti kuuntelee puhuessaan, päättää reagoidaanko.
+# MIN = vähimmäisaika ennen lähetystä; MAX = puskurin koko — korkea MAX = koko puhe bottille.
+INTERRUPT_MIN_SEGMENT_SECONDS = 1.8
+INTERRUPT_MAX_SEGMENT_SECONDS = 8.0  # Sama kuin normaali — koko alusta lähtien kuunneltu puhe saatavilla
 INTERRUPT_MAX_SILENCE_BETWEEN_SPEECH_SECONDS = 0.5
 
 # Musiikin ducking: hiljaisuuden kesto (s) puheen jälkeen ennen volyymin palautusta.
@@ -78,6 +81,7 @@ class UtteranceTask:
     text: str
     heard_at: float
     interruption: bool = False
+    language: str = ""
 
 
 audio_queue: "queue.Queue[np.ndarray]" = queue.Queue(maxsize=128)
@@ -138,60 +142,61 @@ def _prepare_audio(frames: list[np.ndarray], native_sr: int) -> np.ndarray:
     return audio
 
 
-def _transcribe_local(model, audio: np.ndarray) -> str:
-    """Paikallinen faster-whisper (käytetään vain kun USE_CLOUD_STT=False)."""
+def _transcribe_cloud(audio: np.ndarray) -> tuple[str, str]:
+    """OpenAI Whisper API (pilvi). Palauttaa (teksti, kielikoodi)."""
+    t0 = time.monotonic()
+    text, lang = stt_openai.transcribe(
+        audio,
+        VAD_SAMPLE_RATE,
+        language=None,  # auto-detect
+        prompt=WHISPER_PROMPT,
+        return_language=True,
+    )
+    print(f"[Timing] Whisper cloud ({len(audio)/VAD_SAMPLE_RATE:.1f}s): {time.monotonic()-t0:.2f}s")
+    if text:
+        print(f"[Whisper/{lang or '?'}] {text}")
+    return text, lang
+
+
+def _transcribe_local_with_lang(model, audio: np.ndarray) -> tuple[str, str]:
+    """Paikallinen faster-whisper, palauttaa (teksti, kielikoodi)."""
     t0 = time.monotonic()
     segments, info = model.transcribe(
         audio,
         task="transcribe",
-        language="fi",
+        language=None,  # auto-detect
         initial_prompt=WHISPER_PROMPT,
         condition_on_previous_text=True,
         no_speech_threshold=0.35,
         temperature=(0.0, 0.2, 0.4),
     )
     text = "".join(seg.text for seg in segments).strip()
+    lang = getattr(info, "language", "") or ""
     print(f"[Timing] Whisper local ({len(audio)/VAD_SAMPLE_RATE:.1f}s): {time.monotonic()-t0:.2f}s")
     if text:
-        print(f"[Whisper/{info.language}] {text}")
-    return text
-
-
-def _transcribe_cloud(audio: np.ndarray) -> str:
-    """OpenAI Whisper API (pilvi)."""
-    t0 = time.monotonic()
-    text = stt_openai.transcribe(
-        audio,
-        VAD_SAMPLE_RATE,
-        language="fi",
-        prompt=WHISPER_PROMPT,
-    )
-    print(f"[Timing] Whisper cloud ({len(audio)/VAD_SAMPLE_RATE:.1f}s): {time.monotonic()-t0:.2f}s")
-    if text:
-        print(f"[Whisper/fi] {text}")
-    return text
+        print(f"[Whisper/{lang or '?'}] {text}")
+    return text, lang
 
 
 def transcribe(
     model,
     frames: list[np.ndarray],
     native_sr: int,
-) -> str:
-    """Prepare audio, optionally skip very quiet segments, then run local or cloud STT."""
+) -> tuple[str, str]:
+    """Prepare audio and run STT. Returns (text, language_code)."""
     audio = _prepare_audio(frames, native_sr)
-    # Ohita pilvikutsu jos segmentti on liian hiljainen (taustamelu, säästää API-kutsuja).
     if np.abs(audio).max() < 0.08:
-        return ""
+        return "", ""
     if USE_CLOUD_STT:
         return _transcribe_cloud(audio)
-    return _transcribe_local(model, audio)
+    return _transcribe_local_with_lang(model, audio)
 
 
 def _transcription_worker(model, native_sr: int) -> None:
     while True:
         task = segment_queue.get()
         try:
-            text = transcribe(model, task.frames, native_sr)
+            text, lang = transcribe(model, task.frames, native_sr)
             if text:
                 _put_latest(
                     utterance_queue,
@@ -199,6 +204,7 @@ def _transcription_worker(model, native_sr: int) -> None:
                         text=text,
                         heard_at=task.heard_at,
                         interruption=task.interruption,
+                        language=lang,
                     ),
                 )
         finally:
@@ -210,9 +216,17 @@ def _dialogue_worker(engine: ConversationEngine) -> None:
         utterance = utterance_queue.get()
         try:
             if utterance.interruption:
-                engine.handle_interruption(utterance.text, now=utterance.heard_at)
+                engine.handle_interruption(
+                    utterance.text,
+                    now=utterance.heard_at,
+                    language=utterance.language,
+                )
             else:
-                engine.handle(utterance.text, now=utterance.heard_at)
+                engine.handle(
+                    utterance.text,
+                    now=utterance.heard_at,
+                    language=utterance.language,
+                )
         finally:
             utterance_queue.task_done()
 
@@ -348,11 +362,18 @@ def listen_forever() -> None:
                             if capture_mode == "interrupt"
                             else MAX_SILENCE_BETWEEN_SPEECH_SECONDS
                         )
-                        min_segment = (
-                            INTERRUPT_MIN_SEGMENT_SECONDS
-                            if capture_mode == "interrupt"
-                            else MIN_SEGMENT_SECONDS
-                        )
+                        if capture_mode == "interrupt":
+                            min_segment = INTERRUPT_MIN_SEGMENT_SECONDS
+                        else:
+                            try:
+                                from Tools.music import is_playing
+                                min_segment = (
+                                    MIN_SEGMENT_WHEN_MUSIC_PLAYING
+                                    if is_playing()
+                                    else MIN_SEGMENT_SECONDS
+                                )
+                            except Exception:
+                                min_segment = MIN_SEGMENT_SECONDS
                         if silence_duration >= max_silence:
                             if segment_duration >= min_segment:
                                 _put_latest(

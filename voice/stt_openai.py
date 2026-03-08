@@ -33,27 +33,54 @@ def _float32_to_wav_bytes(audio: np.ndarray, sample_rate: int) -> bytes:
     return buf.read()
 
 
+# Kielen tunnistus: Whisper palauttaa "finnish", "english" jne. -> ISO 639-1.
+_LANG_NAME_TO_CODE: dict[str, str] = {
+    "finnish": "fi",
+    "english": "en",
+    "swedish": "sv",
+    "german": "de",
+    "french": "fr",
+    "spanish": "es",
+    "italian": "it",
+    "dutch": "nl",
+    "portuguese": "pt",
+    "russian": "ru",
+    "japanese": "ja",
+    "chinese": "zh",
+    "korean": "ko",
+}
+
+
 def transcribe(
     audio: np.ndarray,
     sample_rate: int,
     *,
-    language: str = "fi",
+    language: str | None = None,
     prompt: str | None = None,
-) -> str:
-    """Send audio to OpenAI Whisper API and return transcribed text."""
+    return_language: bool = False,
+) -> str | tuple[str, str]:
+    """Send audio to OpenAI Whisper API. Returns (text, lang_code) if return_language else text.
+    When language=None, Whisper auto-detects. When return_language=True, uses verbose_json."""
     if audio.size == 0:
-        return ""
+        return ("", "") if return_language else ""
     wav_bytes = _float32_to_wav_bytes(audio, sample_rate)
     client = _client()
-    # API expects a file-like object with name attribute for extension.
     file_like = io.BytesIO(wav_bytes)
     file_like.name = "audio.wav"
-    kwargs = {
+    kwargs: dict = {
         "model": "whisper-1",
         "file": file_like,
-        "language": language,
     }
     if prompt:
-        kwargs["prompt"] = prompt[:1000]  # API limit
+        kwargs["prompt"] = prompt[:1000]
+    if language is not None:
+        kwargs["language"] = language
+    if return_language:
+        kwargs["response_format"] = "verbose_json"
     response = client.audio.transcriptions.create(**kwargs)
-    return (response.text or "").strip()
+    text = (response.text or "").strip()
+    if return_language:
+        lang_name = (getattr(response, "language", None) or "finnish").lower()
+        lang_code = _LANG_NAME_TO_CODE.get(lang_name, "") if lang_name else ""
+        return text, lang_code
+    return text

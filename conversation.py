@@ -54,6 +54,10 @@ INTERRUPT_WORDS = [
     "wait",
     "hold on",
     "shut up",
+    "hiljaa",
+    "tuki",
+    "lopeta puhuminen",
+    "hetki",
 ]
 INACTIVITY_TIMEOUT = 60.0  # seconds of silence before going offline
 
@@ -76,7 +80,7 @@ class ConversationEngine:
         self._last_spoken_text = ""
 
     # ------------------------------------------------------------------
-    def handle(self, text: str, now: float) -> None:
+    def handle(self, text: str, now: float, *, language: str = "") -> None:
         """Called by main.py for every transcribed utterance."""
         with self._lock:
             if self._online and (now - self._last_activity) >= INACTIVITY_TIMEOUT:
@@ -97,13 +101,15 @@ class ConversationEngine:
                 # Jos vain herätyssana: ei "Hey I'm listening", vaan LLM vastaa persoonalla (mitä isäntä)
                 text_to_process = remainder.strip() if has_followup else "mitä isäntä"
                 self._start_session(now, matched_wake_word, announce=False)
-                self._process_online_text(text_to_process, now=now)
+                self._process_online_text(text_to_process, now=now, language=language)
                 return
 
-            self._process_online_text(text, now=now)
+            self._process_online_text(text, now=now, language=language)
 
-    def handle_interruption(self, text: str, now: float) -> bool:
-        """Handle an utterance captured while the bot is speaking."""
+    def handle_interruption(self, text: str, now: float, *, language: str = "") -> bool:
+        """Handle an utterance captured while the bot is speaking.
+        Botti kuuntelee koko ajan; text = alusta lähtien kuunneltu puhe (koko segmentti).
+        Päätetään reagoidaanko: vain selkeä keskeytys (wake word, stop, pitkä tarkoituksellinen lause)."""
         with self._lock:
             normalized = text.lower()
             matched_wake_word = next((word for word in WAKE_WORDS if word in normalized), None)
@@ -124,6 +130,9 @@ class ConversationEngine:
                 and local_command is None
                 and not clear_interrupt
             ):
+                # Ei tarkoituksellinen keskeytys — botti jatkaa normaalisti, ei keskeytä
+                preview = (text[:50] + "...") if len(text) > 50 else text
+                print(f"[Interrupt ignored] {preview}")
                 return False
 
             if matched_wake_word:
@@ -147,7 +156,7 @@ class ConversationEngine:
                 self._last_activity = now
                 return True
 
-            self._process_online_text(remainder, now=now)
+            self._process_online_text(remainder, now=now, language=language, interrupted=True)
             return True
 
     # ------------------------------------------------------------------
@@ -199,7 +208,14 @@ class ConversationEngine:
         self._brain.reset()
         print(f"[Engine] OFFLINE. Say '{WAKE_WORDS[0]}' to wake me up.")
 
-    def _process_online_text(self, text: str, *, now: float) -> None:
+    def _process_online_text(
+        self,
+        text: str,
+        *,
+        now: float,
+        language: str = "",
+        interrupted: bool = False,
+    ) -> None:
         self._last_activity = now
         if self._last_spoken_text and self._text_looks_like_echo(text, self._last_spoken_text):
             self._last_spoken_text = ""
@@ -232,6 +248,8 @@ class ConversationEngine:
             text=text,
             session_id=self._session_id,
             person_id=self._person_id,
+            language=language,
+            interrupted=interrupted,
         )
 
     def _speak_reply(self, text: str, *, end_session_reason: str | None = None) -> SpeechHandle | None:
@@ -277,6 +295,8 @@ class ConversationEngine:
         text: str,
         session_id: str | None,
         person_id: str | None,
+        language: str = "fi",
+        interrupted: bool = False,
     ) -> None:
         """Stream LLM reply with tools; execute tool_calls after stream ends."""
         cancel_event = threading.Event()
@@ -289,6 +309,7 @@ class ConversationEngine:
         threading.Thread(
             target=self._run_streamed_reply_with_tools,
             args=(text, session_id, person_id, generation, cancel_event),
+            kwargs={"language": language, "interrupted": interrupted},
             daemon=True,
         ).start()
 
@@ -299,6 +320,9 @@ class ConversationEngine:
         person_id: str | None,
         generation: int,
         cancel_event: threading.Event,
+        *,
+        language: str = "",
+        interrupted: bool = False,
     ) -> None:
         tool_calls_out: list = []
         chunks = self._brain.stream_think_with_tools(
@@ -307,6 +331,8 @@ class ConversationEngine:
             person_id=person_id,
             stop_event=cancel_event,
             tool_calls_out=tool_calls_out,
+            language=language,
+            interrupted=interrupted,
         )
         full_reply = self._speak_streamed_reply(
             chunks,
@@ -372,9 +398,13 @@ class ConversationEngine:
             if generation == self._reply_generation and cancel_event.is_set():
                 self._active_reply_text = ""
 
+    # Pienempi kynnys = vähemmän TTS-kutsuja, lyhyet lauseet yhdistetään.
+    _TTS_BATCH_MIN_CHARS = 45
+
     def _speak_streamed_reply(self, chunks, *, generation: int, cancel_event: threading.Event) -> str:
         last_handle: SpeechHandle | None = None
         reply_parts: list[str] = []
+        buffer = ""
         for chunk in chunks:
             with self._lock:
                 if cancel_event.is_set() or generation != self._reply_generation:
@@ -383,12 +413,17 @@ class ConversationEngine:
             if not cleaned:
                 continue
             reply_parts.append(cleaned)
+            buffer = (buffer + " " + cleaned).strip() if buffer else cleaned
             with self._lock:
                 if cancel_event.is_set() or generation != self._reply_generation:
                     break
-                self._active_reply_text = " ".join(reply_parts).strip()
-            last_handle = speak(cleaned)
+                self._active_reply_text = buffer
+            if len(buffer) >= self._TTS_BATCH_MIN_CHARS:
+                last_handle = speak(buffer)
+                buffer = ""
 
+        if buffer:
+            last_handle = speak(buffer)
         full_reply = " ".join(reply_parts).strip()
         if not full_reply:
             return ""
@@ -447,14 +482,15 @@ class ConversationEngine:
         self._active_reply_text = ""
 
     def _looks_like_clear_interrupt(self, text: str) -> bool:
-        """True vain jos käyttäjän lause on selkeästi tarkoituksellinen (ei taustamelua/pikkuääniä)."""
+        """True vain jos käyttäjän lause on selkeästi tarkoituksellinen keskeytys.
+        Botti kuuntelee ilman keskeytystä; vain pitkä ja selkeä puhe keskeyttää."""
         normalized = text.lower().strip()
         if not normalized:
             return False
 
         words = re.findall(r"\w+", normalized)
-        # Korkeampi kynnys: vähintään 6 sanaa JA 28 merkkiä, jotta botti ei keskeydy taustamelusta.
-        if len(words) < 6 or len(normalized) < 28:
+        # Korkea kynnys: vähintään 8 sanaa JA 40 merkkiä — ei taustamelu, ei lyhyet äänähdykset.
+        if len(words) < 8 or len(normalized) < 40:
             return False
 
         active_words = set(re.findall(r"\w+", self._active_reply_text.lower()))

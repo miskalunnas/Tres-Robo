@@ -209,6 +209,8 @@ class Brain:
         person_id: str | None = None,
         stop_event: threading.Event | None = None,
         tool_calls_out: list | None = None,
+        language: str = "",
+        interrupted: bool = False,
     ) -> Iterator[str]:
         """Stream a reply with tools enabled. Yields speakable content chunks.
         When the stream ends, appends parsed tool_calls to tool_calls_out (each item
@@ -216,7 +218,13 @@ class Brain:
         """
         if tool_calls_out is None:
             tool_calls_out = []
-        messages = self._build_messages(user_text, session_id=session_id, person_id=person_id)
+        messages = self._build_messages(
+            user_text,
+            session_id=session_id,
+            person_id=person_id,
+            language=language,
+            interrupted=interrupted,
+        )
         print(f"[Brain] Streaming API call with tools (model={MODEL}, history_len={len(messages)})...")
 
         t0 = time.monotonic()
@@ -438,6 +446,8 @@ class Brain:
         *,
         session_id: str | None,
         person_id: str | None,
+        language: str = "",
+        interrupted: bool = False,
     ) -> list[dict]:
         """Rakenna viestilista: system prompt + edellinen yhteenveto + 5 faktaa + (ehkä) 4 tietopohja-osumaa + 8 viimeisintä viestiä."""
         if self._store is None or not session_id:
@@ -469,6 +479,18 @@ class Brain:
                     "role": "system",
                     "content": f"Konteksti (muisti + tietopohja):\n{context_text}",
                 }
+            )
+        # Kieli ja keskeytys: botti neutraali, vastaa aina käyttäjän kielellä
+        hints: list[str] = []
+        if language:
+            _lang_hints = {"fi": "suomea", "en": "englantia", "sv": "ruotsia", "de": "saksaa"}
+            lang_desc = _lang_hints.get(language, language)
+            hints.append(f"Käyttäjä puhui {lang_desc}. Vastaa samalla kielellä.")
+        if interrupted:
+            hints.append("Käyttäjä keskeytti sinut juuri. Vastaa lyhyesti ja ota se huomioon.")
+        if hints:
+            messages.append(
+                {"role": "system", "content": " ".join(hints)}
             )
         messages.append(
             {

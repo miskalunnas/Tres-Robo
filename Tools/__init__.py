@@ -97,7 +97,7 @@ def handle_speech(text: str) -> ToolExecutionResult:
 
         vol = volume_down()
         response = f"Volume set to {vol}%."
-    elif action in ("greeting", "help"):
+    elif action in ("greeting", "help", "acknowledgment"):
         pass
     else:
         execute(cmd)

@@ -114,6 +114,7 @@ GREETING_KEYWORDS = (
     "good afternoon", "good evening", "what's up", "whats up",
     "how are you", "how's it going", "hows it going",
     "moi", "hei", "terve", "moro", "moikka", "päivää", "paivaa",
+    "miten menee", "mitä kuuluu", "mita kuuluu",
     "hi",
 )
 
@@ -139,6 +140,11 @@ JOKE_KEYWORDS = (
     "got a joke", "do you know a joke", "know any jokes",
     "kerro vitsi", "vitsi", "vitsiä", "vitsia",
     "joke",
+)
+
+# Acknowledgment / kiitokset — lyhyt vastaus, ei LLM
+ACKNOWLEDGMENT_KEYWORDS = (
+    "kiitos kun katsoit", "kiitos paljon", "kiitos siitä",
 )
 
 
@@ -242,7 +248,10 @@ def parse_command(text: str) -> dict | None:
         return {"action": "tell_joke"}
 
     if any(_word_match(kw, normalized) for kw in GREETING_KEYWORDS):
-        return {"action": "greeting", "response": "Hey there! What can I do for you?"}
+        return {"action": "greeting", "response": "Hei! Mitä haluat?"}
+
+    if any(_word_match(kw, normalized) for kw in ACKNOWLEDGMENT_KEYWORDS):
+        return {"action": "acknowledgment", "response": "Eipä kestä!"}
 
     return None
 
