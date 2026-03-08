@@ -48,9 +48,18 @@ def capture_and_describe(question: str, client) -> str:
         return "Kuvan koodaus epäonnistui."
     b64 = base64.b64encode(buf.tobytes()).decode()
 
-    # Prepend identity hint to question so Vision model has context while answering.
-    identity_hint = ("Tunnistetut henkilöt kuvassa: " + ", ".join(names) + ". ") if names else ""
-    prompt = identity_hint + question
+    # Identity is resolved by dlib face_recognition — Vision model must NOT re-verify it.
+    # Telling the Vision model to verify identity causes it to refuse ("I can't identify people").
+    # Instead, we tell it identity is already known and ask it only to describe what it observes.
+    if names:
+        identity_context = (
+            f"Face recognition (not you) has already identified the person(s) in the image as: {', '.join(names)}. "
+            "Accept this as fact and do not question or re-verify it. "
+            "Focus only on answering the following visual question about appearance, emotion, or scene: "
+        )
+    else:
+        identity_context = ""
+    prompt = identity_context + question
 
     try:
         resp = client.chat.completions.create(
@@ -74,7 +83,7 @@ def capture_and_describe(question: str, client) -> str:
             timeout=15,
         )
         description = (resp.choices[0].message.content or "").strip()
-        # Always prefix recognized names in the returned string so the bot can't miss them.
+        # Prefix with recognized names so the bot can use them in its reply.
         if names:
             return "Huoneessa on: " + ", ".join(names) + ". " + description
         return description
