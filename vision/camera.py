@@ -90,9 +90,9 @@ class Camera:
         # video_configuration returns XRGB or BGR depending on Pi OS version.
         # Normalise to BGR (3-channel) for OpenCV/JPEG encoding.
         if frame.ndim == 3 and frame.shape[2] == 4:
-            # libcamera XBGR8888: channels are [X, B, G, R].
-            # Drop channel 0 (X) — channels 1-3 are already BGR.
-            frame = frame[:, :, 1:4]
+            # XBGR8888 on little-endian ARM: memory order is [R, G, B, X].
+            # Drop X (channel 3) and swap R↔B to get BGR for OpenCV.
+            frame = cv2.cvtColor(frame[:, :, :3], cv2.COLOR_RGB2BGR)
         elif frame.ndim == 3 and frame.shape[2] == 3:
             # Assume RGB from libcamera → BGR for OpenCV
             frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
