@@ -268,8 +268,9 @@ class ConversationEngine:
         interrupted: bool = False,
     ) -> None:
         self._last_activity = now
-        if self._last_spoken_text and self._text_looks_like_echo(text, self._last_spoken_text):
-            self._last_spoken_text = ""
+        # Hylätään kaiku: botti kuulee omansa mikistä
+        refs = [r for r in (self._active_reply_text, self._last_spoken_text) if r and r.strip()]
+        if refs and any(self._text_looks_like_echo(text, ref) for ref in refs):
             return
         print(f"[Online heard] {text}")
         print(f"You said: {text}")
@@ -552,12 +553,13 @@ class ConversationEngine:
             return False
 
         # 3. Ei kaiku: hylätään jos teksti muistuttaa botin omaa puhetta
-        active_words = set(re.findall(r"\w+", self._active_reply_text.lower()))
-        if active_words:
-            current_words = set(words)
-            overlap = len(current_words & active_words) / max(1, len(current_words))
-            if overlap >= 0.5:
-                return False
+        for ref_text in (self._active_reply_text, self._last_spoken_text):
+            ref_words = set(re.findall(r"\w+", (ref_text or "").lower()))
+            if ref_words:
+                current_words = set(words)
+                overlap = len(current_words & ref_words) / max(1, len(current_words))
+                if overlap >= 0.4:
+                    return False
 
         return True
 
@@ -566,7 +568,7 @@ class ConversationEngine:
         return self._text_looks_like_echo(text, self._active_reply_text)
 
     def _text_looks_like_echo(self, text: str, reference: str) -> bool:
-        """True if text is largely the same as reference (bot's own speech). Kynnys 0.5 = vähemmän vääriä keskeytyksiä."""
+        """True if text is largely the same as reference (bot's own speech). Kynnys 0.4 = vähemmän oman äänen kuulemista."""
         rem = text.lower().strip()
         ref = reference.lower()
         if not rem or not ref:
@@ -576,9 +578,9 @@ class ConversationEngine:
         if not words_rem:
             return False
         overlap = len(words_rem & words_ref) / len(words_rem)
-        if overlap >= 0.5:
+        if overlap >= 0.4:
             return True
-        if len(rem) >= 8 and rem in ref:
+        if len(rem) >= 6 and rem in ref:
             return True
         return False
 
