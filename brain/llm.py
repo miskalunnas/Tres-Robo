@@ -143,16 +143,19 @@ LLM_TOOLS = [
         "function": {
             "name": "see",
             "description": (
-                "Capture a photo from the camera and analyze what is visible. "
-                "Use when the user asks what you see, who is in the room, "
-                "what something looks like, or any visual question."
+                "Your eyes — capture a photo and answer any visual question. "
+                "ALWAYS use this when you need to see something instead of guessing. "
+                "Use for: user appearance or emotion ('do I look happy?', 'am I tired?', 'what am I wearing?'), "
+                "who is in the room, what objects are visible, room layout, body language, "
+                "or any question where seeing is needed to answer accurately. "
+                "Never assume or make up visual information — look first."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "question": {
                         "type": "string",
-                        "description": "The specific visual question to answer from the image, e.g. 'Kuka on huoneessa?' or 'What do you see?'",
+                        "description": "The specific visual question to answer, e.g. 'Does the person look happy?', 'What is the person wearing?', 'Who is in the room?'",
                     }
                 },
                 "required": ["question"],

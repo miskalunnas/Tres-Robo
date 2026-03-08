@@ -17,8 +17,7 @@ from Tools import handle_speech as handle_tool_speech
 from Tools.commands import parse_command
 from voice.tts import SpeechHandle, interrupt as interrupt_speech, speak
 
-WAKE_WORDS = [
-    # Founderbot (täsmälliset)
+WAKE_WORDS = [ 
     "founderbot",
     "founderbott",
     "founder bot",
@@ -26,29 +25,11 @@ WAKE_WORDS = [
     "found a bot",
     "founder bott",
     "founderbotti",
-    # Hei + bot
-    "hei botti",
-    "hei bot",
-    "hei robot",
-    "hei robotti",
-    # Kuule + bot (selkeä adressointi)
-    "kuule botti",
-    "kuule bot",
-    "bot kuule",
-    "botti kuule",
-    # Tervehdys + bot (myös pilkulla: "moro, founder, bot")
-    "terve botti",
-    "terve bot",
-    "moro botti",
-    "moro bot",
-    "moro, bot",
-    "moro, founder",
-    "moi botti",
-    "moi bot",
-    # Lyhyet (kauempaa puhuttaessa)
-    "ok bot",
-    "okay bot",
-    "yo bot",
+    "bot",
+    "robot",
+    "robotti",
+    "botti",
+    "founder",
 ]
 
 
@@ -106,7 +87,7 @@ ADDRESSING_KEYWORDS = (
     "ääni", "volume", "kovemmalle", "hiljemmalle", "louder", "quieter",
 )
 
-INACTIVITY_TIMEOUT = 60.0  # seconds of silence before going offline
+INACTIVITY_TIMEOUT = 40.0  # seconds of silence before going offline
 
 
 class ConversationEngine:
@@ -125,6 +106,7 @@ class ConversationEngine:
         self._person_id: str | None = None
         self._lock = threading.RLock()
         self._reply_cancel_event: threading.Event | None = None
+        self._startup_vision_ready: threading.Event | None = None
         self._reply_generation = 0
         self._active_reply_text = ""
         self._last_spoken_text = ""
@@ -237,11 +219,13 @@ class ConversationEngine:
             payload={"wake_word": wake_word},
         )
         print("[Engine] Wake word detected — going ONLINE.")
-        threading.Thread(target=self._run_startup_vision, daemon=True).start()
+        ready_event = threading.Event()
+        self._startup_vision_ready = ready_event
+        threading.Thread(target=self._run_startup_vision, args=(ready_event,), daemon=True).start()
         if announce:
             self._speak_reply("Hey! I'm listening.")
 
-    def _run_startup_vision(self) -> None:
+    def _run_startup_vision(self, ready_event: threading.Event) -> None:
         """Capture a frame at session start to identify who's in the room."""
         try:
             from vision.camera import Camera
@@ -257,6 +241,8 @@ class ConversationEngine:
             self._brain.set_startup_context(context)
         except Exception as exc:
             print(f"[Vision] Startup scan failed: {exc}", file=sys.stderr)
+        finally:
+            ready_event.set()
 
     def _end_session(self, reason: str) -> None:
         with self._lock:
@@ -400,6 +386,13 @@ class ConversationEngine:
         language: str = "",
         interrupted: bool = False,
     ) -> None:
+        # Wait for startup vision (camera + face recognition) before the first LLM call
+        # so the bot knows who's in the room when generating the greeting.
+        ready_event = self._startup_vision_ready
+        if ready_event is not None and not ready_event.is_set():
+            ready_event.wait(timeout=1.5)
+            self._startup_vision_ready = None  # Only gate the first turn
+
         tool_calls_out: list = []
         chunks = self._brain.stream_think_with_tools(
             text,
