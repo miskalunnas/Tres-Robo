@@ -26,6 +26,10 @@ def capture_and_describe(question: str, client) -> str:
         print(f"[Vision] Camera capture error: {exc}", file=sys.stderr)
         return "En saanut kuvaa kamerasta."
 
+    # Always save last frame for debugging — inspect at /tmp/vision_debug.jpg
+    cv2.imwrite("/tmp/vision_debug.jpg", frame)
+    print(f"[Vision] Debug frame saved to /tmp/vision_debug.jpg (shape={frame.shape})")
+
     # Encode as JPEG. detail="low" in the API caps at 512 px anyway, so quality 75 is fine.
     ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 75])
     if not ok or buf is None:
