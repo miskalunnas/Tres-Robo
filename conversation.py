@@ -78,6 +78,18 @@ INTERRUPT_WORDS = [
     "lopeta puhuminen",
     "hetki",
 ]
+
+# Puhe on suunnattu botille (ei taustakeskustelu tai toiselle henkilölle).
+# Käytetään _looks_like_clear_interrupt:ssa — suodattaa "mitä sanoit siitä kokouksesta" jne.
+ADDRESSING_KEYWORDS = (
+    "bot", "botti", "robot", "founderbot", "robotti",
+    "soita", "play", "kerro", "lopeta", "tauko", "jatka", "seuraava", "skip", "pause", "resume", "stop",
+    "voisitko", "voisit", "could you", "can you", "would you", "tee", "laita", "lisää",
+    "paljonko kello", "mitä kello", "aika", "time",
+    "vitsi", "joke", "ruokalista", "menu", "lunch",
+    "ääni", "volume", "kovemmalle", "hiljemmalle", "louder", "quieter",
+)
+
 INACTIVITY_TIMEOUT = 60.0  # seconds of silence before going offline
 
 
@@ -504,17 +516,25 @@ class ConversationEngine:
         self._active_reply_text = ""
 
     def _looks_like_clear_interrupt(self, text: str) -> bool:
-        """True vain jos käyttäjän lause on selkeästi tarkoituksellinen keskeytys.
-        Botti kuuntelee ilman keskeytystä; vain pitkä ja selkeä puhe keskeyttää."""
+        """True vain jos puhe on selkeästi suunnattu botille (ei taustakeskustelu tai taustamelu).
+        Suodattaa: taustamelu, lyhyet äänähdykset, ihmiset jotka puhuvat toisilleen."""
         normalized = text.lower().strip()
         if not normalized:
             return False
 
         words = re.findall(r"\w+", normalized)
-        # Korkea kynnys: vähintään 8 sanaa JA 40 merkkiä — ei taustamelu, ei lyhyet äänähdykset.
+        # 1. Pituus: ei taustamelua, ei lyhyitä äänähdyksiä
         if len(words) < 8 or len(normalized) < 40:
             return False
 
+        # 2. Adressointi: puheen pitää viitata botiin tai komentoihin — ei "mitä sanoit kokouksesta"
+        if not any(
+            re.search(rf"\b{re.escape(kw)}\b", normalized)
+            for kw in ADDRESSING_KEYWORDS
+        ):
+            return False
+
+        # 3. Ei kaiku: hylätään jos teksti muistuttaa botin omaa puhetta
         active_words = set(re.findall(r"\w+", self._active_reply_text.lower()))
         if active_words:
             current_words = set(words)
@@ -591,6 +611,13 @@ class ConversationEngine:
 
             vol = volume_down()
             return f"Volume {vol}%."
+        if name == "get_menu":
+            from Tools.menu import get_all_menus, get_menu
+
+            restaurant = (args.get("restaurant") or "").strip().lower()
+            if restaurant:
+                return get_menu(restaurant)
+            return get_all_menus()
         if name == "lookup_knowledge":
             query = (args.get("query") or "").strip() or "TRES SFP Robolabs"
             hits = self._store.search_knowledge(query, limit=6)

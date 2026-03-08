@@ -17,6 +17,7 @@ Priority order:
 # Longer prefixes first so "play music" is not eaten by bare "play".
 PLAY_PREFIXES = (
     "put on some", "put on", "soita jotain", "soita musiikki", "soita",
+    "soittakaa", "laita soimaan", "laitetaan", "taustamusiikkia",
     "play music", "play a song", "play song", "play some", "play me",
     "i want to hear", "i want to listen to", "i wanna hear",
     "let's listen to", "lets listen to",
@@ -25,6 +26,7 @@ PLAY_PREFIXES = (
 )
 QUEUE_PREFIXES = (
     "add to queue", "add to the queue", "lisää jonoon", "lisää listaan",
+    "laita jonoon", "laita seuraavaksi", "seuraavaksi soita",
     "queue up", "put in queue", "put in the queue",
     "enqueue", "queue",
 )
@@ -80,10 +82,14 @@ MENU_KEYWORDS = (
     "what are they serving", "what do they serve",
     "food menu", "daily menu", "check the menu",
     "what's cooking", "whats cooking",
+    "what's for food", "whats for food", "what food", "what to eat",
     "ruokalista", "lounaslista", "päivän ruoka", "paivan ruoka",
     "päivän lounas", "paivan lounas", "mitä ruuaksi", "mita ruuaksi",
     "mitä lounaaksi", "mita lounaaksi", "mitä on ruokana", "mita on ruokana",
     "mitä on lounaalla", "mita on lounaalla", "mitä ruokana", "mita ruokana",
+    "mitä ruokaa", "mita ruokaa", "mitä ruokaa on", "mita ruokaa on",
+    "mitä ruokaa tänään", "mita ruokaa tanaan", "mitä tänään ruokana", "mita tanaan ruokana",
+    "mitä on ruokaa", "mita on ruokaa", "mitä housella ruokana", "mita housella ruokana",
     "lunch", "menu",
 )
 RESTAURANT_ALIASES: dict[str, str] = {
@@ -174,7 +180,7 @@ def parse_command(text: str) -> dict | None:
     #        eaten by the "play" prefix ────────────────────────────
 
     if any(_word_match(kw, normalized) for kw in RESUME_KEYWORDS):
-        return {"action": "music_resume", "response": "Resuming playback."}
+        return {"action": "music_resume", "response": "Jatketaan."}
 
     # ── 2. Prefix commands (carry a query) — checked before simple
     #        skip/pause/stop so "play next level" is play, not skip
@@ -187,7 +193,7 @@ def parse_command(text: str) -> dict | None:
             return {
                 "action": "music_queue",
                 "query": query,
-                "response": f"Added to queue: {query}",
+                "response": f"Lisätty jonoon: {query}",
             }
 
     for prefix in PLAY_PREFIXES:
@@ -198,7 +204,7 @@ def parse_command(text: str) -> dict | None:
             return {
                 "action": "music_play",
                 "query": query,
-                "response": f"Playing: {query}",
+                "response": f"Soitetaan: {query}",
             }
 
     # ── 3. Simple music commands ──────────────────────────────────
@@ -207,10 +213,10 @@ def parse_command(text: str) -> dict | None:
         return {"action": "music_skip", "response": "Skipping to next song."}
 
     if any(_word_match(kw, normalized) for kw in PAUSE_KEYWORDS):
-        return {"action": "music_pause", "response": "Music paused."}
+        return {"action": "music_pause", "response": "Tauko."}
 
     if any(_word_match(kw, normalized) for kw in STOP_KEYWORDS):
-        return {"action": "music_stop", "response": "Playback stopped."}
+        return {"action": "music_stop", "response": "Lopetettu."}
 
     # ── 3. Volume ─────────────────────────────────────────────────
 
@@ -218,7 +224,7 @@ def parse_command(text: str) -> dict | None:
         return {"action": "volume_up", "response": "Turning it up."}
 
     if any(_word_match(kw, normalized) for kw in VOLUME_DOWN_KEYWORDS):
-        return {"action": "volume_down", "response": "Turning it down."}
+        return {"action": "volume_down", "response": "Hiljemmalle."}
 
     # ── 4. Menu / lunch commands ─────────────────────────────────
 
@@ -235,9 +241,8 @@ def parse_command(text: str) -> dict | None:
         return {
             "action": "help",
             "response": (
-                "I can play music, check lunch menus for Reaktori, Newton, "
-                "Konehuone and Hertsi, tell you the time, and tell jokes. "
-                "Just ask!"
+                "Voin soittaa musiikkia (soita, skip, tauko, jatka, lopeta), "
+                "tarkistaa ruokalistat, kertoa kellonajan ja vitsin. Kysy vapaasti."
             ),
         }
 

@@ -30,38 +30,56 @@ def handle_speech(text: str) -> ToolExecutionResult:
     success = True
 
     if action == "music_play":
-        from .music import play_async
-
-        query = (cmd.get("query") or "music").strip() or "music"
-        play_async(query)
-        response = cmd.get("response") or f"Playing {query}."
+        try:
+            from .music import play_async
+            query = (cmd.get("query") or "music").strip() or "music"
+            play_async(query)
+            response = cmd.get("response") or f"Soitetaan: {query}."
+        except Exception:
+            response = "Musiikkitoiminto ei ole valmis. Asenna yt-dlp ja ffmpeg tai mpv."
+            success = False
     elif action == "music_queue":
-        from .music import add_to_queue
-
-        add_to_queue(cmd.get("query", ""))
-        response = cmd.get("response") or "Added to queue."
+        try:
+            from .music import add_to_queue
+            add_to_queue(cmd.get("query", ""))
+            response = cmd.get("response") or "Lisätty jonoon."
+        except Exception:
+            response = "Musiikkitoiminto ei ole valmis."
+            success = False
     elif action == "music_skip":
-        from .music import skip
-
-        ok = skip()
-        response = cmd.get("response") if ok else "Nothing playing to skip."
-        if ok and not response:
-            response = "Skipping to next song."
+        try:
+            from .music import skip
+            ok = skip()
+            response = cmd.get("response") if ok else "Ei mitään soittamassa."
+            if ok and not response:
+                response = "Seuraava kappale."
+        except Exception:
+            response = "Musiikkitoiminto ei ole valmis."
+            success = False
     elif action == "music_pause":
-        from .music import pause
-
-        ok = pause()
-        response = "Music paused." if ok else "Nothing to pause."
+        try:
+            from .music import pause
+            ok = pause()
+            response = "Tauko." if ok else "Ei mitään pausettavana."
+        except Exception:
+            response = "Musiikkitoiminto ei ole valmis."
+            success = False
     elif action == "music_resume":
-        from .music import resume
-
-        ok = resume()
-        response = "Resuming playback." if ok else "Nothing to resume."
+        try:
+            from .music import resume
+            ok = resume()
+            response = "Jatketaan." if ok else "Ei mitään jatkettavana."
+        except Exception:
+            response = "Musiikkitoiminto ei ole valmis."
+            success = False
     elif action == "music_stop":
-        from .music import stop
-
-        ok = stop()
-        response = "Playback stopped." if ok else "Nothing was playing."
+        try:
+            from .music import stop
+            ok = stop()
+            response = "Lopetettu." if ok else "Ei mitään soittanut."
+        except Exception:
+            response = "Musiikkitoiminto ei ole valmis."
+            success = False
     elif action == "menu_check":
         from .menu import get_all_menus, get_menu
 
@@ -76,7 +94,7 @@ def handle_speech(text: str) -> ToolExecutionResult:
         from datetime import datetime
 
         now = datetime.now().strftime("%H:%M")
-        response = f"It's {now}."
+        response = f"Kello on {now}."
     elif action == "tell_joke":
         import random
 
@@ -93,10 +111,13 @@ def handle_speech(text: str) -> ToolExecutionResult:
         vol = volume_up()
         response = f"Volume set to {vol}%."
     elif action == "volume_down":
-        from .music import volume_down
-
-        vol = volume_down()
-        response = f"Volume set to {vol}%."
+        try:
+            from .music import volume_down
+            vol = volume_down()
+            response = f"Ääni {vol}%."
+        except Exception:
+            response = "Musiikkitoiminto ei ole valmis."
+            success = False
     elif action in ("greeting", "help", "acknowledgment"):
         pass
     else:

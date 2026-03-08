@@ -27,13 +27,13 @@ LLM_TOOLS = [
         "type": "function",
         "function": {
             "name": "play_music",
-            "description": "Start playing music. Use when the user wants to hear music from context (e.g. background, chill, jazz) without saying an explicit command like 'play jazz'.",
+            "description": "Soita musiikkia. Käytä kun käyttäjä haluaa musiikkia: 'laitetaan jotain rauhallista', 'taustamusiikkia', 'jotain rentoa', 'soita jazz', 'chill', 'lo-fi'. Viittaa edelliseen puheeseen: jos puhuttiin jazzista, query='jazz'.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "Search query for the music, e.g. 'chill', 'jazz', 'background music', 'lo-fi'.",
+                        "description": "Hakusana: chill, jazz, lo-fi, rauhallinen, taustamusiikki, artistin nimi, biisin nimi.",
                     }
                 },
                 "required": ["query"],
@@ -44,7 +44,7 @@ LLM_TOOLS = [
         "type": "function",
         "function": {
             "name": "music_skip",
-            "description": "Skip to the next track. Use when the user wants to skip or change the song from context.",
+            "description": "Seuraava kappale. Käytä kun: 'seuraava', 'skip', 'vaihda biisi', 'next', 'toinen biisi'.",
             "parameters": {"type": "object", "properties": {}},
         },
     },
@@ -52,7 +52,7 @@ LLM_TOOLS = [
         "type": "function",
         "function": {
             "name": "music_pause",
-            "description": "Pause playback. Use when the user wants to pause music from context.",
+            "description": "Tauko. Käytä kun: 'tauko', 'pause', 'pauseta', 'pidä tauko'.",
             "parameters": {"type": "object", "properties": {}},
         },
     },
@@ -60,7 +60,7 @@ LLM_TOOLS = [
         "type": "function",
         "function": {
             "name": "music_resume",
-            "description": "Resume playback. Use when the user wants to continue music from context.",
+            "description": "Jatka soittoa. Käytä kun: 'jatka', 'resume', 'jatka soitto', 'continue'.",
             "parameters": {"type": "object", "properties": {}},
         },
     },
@@ -68,7 +68,7 @@ LLM_TOOLS = [
         "type": "function",
         "function": {
             "name": "music_stop",
-            "description": "Stop all music and clear the queue. Use when the user wants to stop, remove, or clear all playing music (e.g. 'stop', 'poista kaikki', 'lopeta', 'clear', 'musiikki pois').",
+            "description": "Lopeta musiikki ja tyhjennä jono. Käytä kun: 'lopeta', 'stop', 'musiikki pois', 'poista kaikki', 'tyhjennä jono', 'clear'.",
             "parameters": {"type": "object", "properties": {}},
         },
     },
@@ -76,13 +76,13 @@ LLM_TOOLS = [
         "type": "function",
         "function": {
             "name": "music_add_to_queue",
-            "description": "Add a song or search query to the playback queue. Use when the user wants to queue something to play next.",
+            "description": "Lisää jonoon. Käytä kun: 'lisää jonoon', 'laita seuraavaksi', 'queue', 'laita jonoon' + biisi/artisti.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "Search query or song name to add to the queue.",
+                        "description": "Biisin tai artistin nimi.",
                     }
                 },
                 "required": ["query"],
@@ -93,7 +93,7 @@ LLM_TOOLS = [
         "type": "function",
         "function": {
             "name": "music_volume_up",
-            "description": "Increase music volume. Use when the user wants louder music (e.g. 'louder', 'kovemmalle', 'tee ääni kovemmaksi').",
+            "description": "Ääni kovemmalle. Käytä kun: 'kovemmalle', 'louder', 'ääni ylös', 'volume up'.",
             "parameters": {"type": "object", "properties": {}},
         },
     },
@@ -101,8 +101,24 @@ LLM_TOOLS = [
         "type": "function",
         "function": {
             "name": "music_volume_down",
-            "description": "Decrease music volume. Use when the user wants quieter music (e.g. 'quieter', 'hiljemmalle', 'tee ääni hiljemmaksi').",
+            "description": "Ääni hiljemmalle. Käytä kun: 'hiljemmalle', 'quieter', 'ääni alas', 'volume down'.",
             "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_menu",
+            "description": "Hae tämän päivän ruokalistat Hervannan kampukselta. Käytä AINA kun käyttäjä kysyy ruokaa, lounasta, ruokalistaa tai mitä on ruokana. Ravintolat: reaktori, newton, konehuone, hertsi.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "restaurant": {
+                        "type": "string",
+                        "description": "Ravintola: reaktori, newton, konehuone, hertsi. Jätä tyhjäksi tai null = kaikki ruokalistat.",
+                    }
+                },
+            },
         },
     },
     {
@@ -470,7 +486,7 @@ class Brain:
             user_text,
             person_id=person_id,
             knowledge_limit=8,
-            memory_limit=5,
+            memory_limit=6,
             include_knowledge=True,
         )
         if context_text:
@@ -496,13 +512,13 @@ class Brain:
             {
                 "role": "system",
                 "content": (
-                    "Kun kontekstissa ei ole vastausta, käytä lookup_knowledge-työkalua "
-                    "(query = hakusana, esim. 'TRES', 'SFP', 'robolabs', 'bot_persona', 'Lauri'). "
-                    "Vastaa aina kontekstin tai tietopohjan perusteella."
+                    "Yhdistä vastauksesi keskusteluun: viittaa edellisiin viesteihin ('se', 'tuo', 'sama'). "
+                    "Kun kontekstissa ei ole vastausta, käytä lookup_knowledge-työkalua. "
+                    "Vastaa aina kontekstin perusteella."
                 ),
             }
         )
-        messages.extend(self._store.get_session_messages(session_id, limit=8))
+        messages.extend(self._store.get_session_messages(session_id, limit=10))
         return messages
 
     def _reset_history(self) -> None:

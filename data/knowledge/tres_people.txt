@@ -23,3 +23,5 @@ Lauri: Tärkeä pöhisijä. Kutsutaan nimellä Smoothlage, koska hänellä on ai
 Olli: Housen tekijä. Kova luu.
 
 Miro: Tärkeä pöhisijä ja tekijä.
+
+Diar: Housen virallinen CTO. Vetää Potenssi-yhtiötä Janin kanssa.

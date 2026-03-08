@@ -62,7 +62,7 @@ WHISPER_PROMPT = (
     "Founderbot, founderbott, founder bot, found a bot, founder bott, founderbotti. "
     "Hei botti, hei bot, hei robot, hei robotti. Kuule botti, kuule bot, bot kuule, botti kuule. "
     "Terve botti, terve bot, moro botti, moro bot, moi botti, moi bot. Ok bot, okay bot, yo bot. "
-    "Soita, soita musiikki, play, skip, seuraava, tauko, pause, jatka, resume, lopeta, stop, queue, poista kaikki, clear. "
+    "Soita, soita musiikki, laita soimaan, laitetaan, taustamusiikkia, play, skip, seuraava, vaihda biisi, tauko, pause, jatka, resume, lopeta, stop, queue, lisää jonoon, poista kaikki, tyhjennä jono, clear. "
     "Volume, volume up, volume down, louder, quieter, kovempaa, hiljempaa, ääni ylös, ääni alas. "
     "Kello, mitä kello on, paljonko kello, aika, time. Vitsi, kerro vitsi, joke. "
     "Ruokalista, lounaslista, mitä ruokana, reaktori, newton, menu, lunch. "
