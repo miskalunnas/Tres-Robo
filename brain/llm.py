@@ -538,7 +538,11 @@ class Brain:
         if language:
             _lang_hints = {"fi": "suomea", "en": "englantia", "sv": "ruotsia", "de": "saksaa", "es": "espanjaa", "fr": "ranskaa"}
             lang_desc = _lang_hints.get(language, language)
-            hints.append(f"Käyttäjä puhui {lang_desc}. Vastaa AINA samalla kielellä.")
+            if language == "en":
+                # Finnish persona tends to ignore Finnish-language instructions — add English enforcement too.
+                hints.append("The user spoke English. You MUST reply in English only. Do not switch to Finnish under any circumstances.")
+            else:
+                hints.append(f"Käyttäjä puhui {lang_desc}. Vastaa AINA samalla kielellä — älä vaihda kieleen jota käyttäjä ei puhunut.")
         if interrupted:
             hints.append("Käyttäjä keskeytti sinut juuri. Vastaa lyhyesti ja ota se huomioon.")
         if hints:
