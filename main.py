@@ -20,8 +20,8 @@ from voice.tts import is_busy
 # Rate expected by webrtcvad and Whisper. Capture may differ — we resample.
 VAD_SAMPLE_RATE = 16_000
 
-# VAD: 0 = herkimmin (ei leikkaa puhetta), 3 = vahvin (voi missata hiljaista puhetta).
-VAD_AGGRESSIVENESS = 0
+# VAD: 0 = herkimmin, 3 = vahvin (vaatii selkeämmän puheen). 1–2 vähentää taustamelun tunnistusta.
+VAD_AGGRESSIVENESS = 1
 
 # VAD frame length (10, 20 or 30 ms).
 VAD_FRAME_DURATION_MS = 30
