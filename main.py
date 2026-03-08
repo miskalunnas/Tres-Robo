@@ -40,10 +40,13 @@ MAX_SEGMENT_SECONDS = 8.0
 # Hiljaisuus ennen kuin lähetetään Whisperille: pienempi = nopeampi vastaus, isompi = vähemmän vähän puhetta leikataan.
 MAX_SILENCE_BETWEEN_SPEECH_SECONDS = 0.5
 
-# Interruption capture runs with shorter segments so the user can cut in.
-INTERRUPT_MIN_SEGMENT_SECONDS = 0.25
+# Interruption capture: korkeampi kynnys = botti ei keskeydy taustamelusta tai lyhyistä äänistä.
+INTERRUPT_MIN_SEGMENT_SECONDS = 0.75
 INTERRUPT_MAX_SEGMENT_SECONDS = 3.0
-INTERRUPT_MAX_SILENCE_BETWEEN_SPEECH_SECONDS = 0.35
+INTERRUPT_MAX_SILENCE_BETWEEN_SPEECH_SECONDS = 0.5
+
+# Musiikin ducking: hiljaisuuden kesto (s) puheen jälkeen ennen volyymin palautusta.
+MUSIC_UNDUCK_SILENCE_SECONDS = 2.5
 
 # Set True to run noisereduce on each segment before Whisper (adds ~100 ms).
 USE_DENOISER = False
@@ -262,6 +265,8 @@ def listen_forever() -> None:
     segment_duration = 0.0
     silence_duration = 0.0
     last_speech_time = time.monotonic()
+    last_speech_or_send = 0.0  # ducking: unduck after this long silence
+    music_ducked = False
     capture_mode = "normal"
 
     with sd.InputStream(
@@ -276,6 +281,7 @@ def listen_forever() -> None:
         print("[Engine] When ONLINE: music (play, skip, pause, resume, stop), menu, time, joke.")
         try:
             while True:
+                now = time.monotonic()
                 chunk = audio_queue.get()
                 if chunk.size == 0:
                     continue
@@ -305,6 +311,15 @@ def listen_forever() -> None:
                     segment_duration += frame_seconds
                     silence_duration = 0.0
                     last_speech_time = time.monotonic()
+                    last_speech_or_send = last_speech_time
+                    # Kun soittaa musiikkia ja puhutaan, pienennä volyymiä (ducking).
+                    try:
+                        from Tools.music import is_playing, duck
+                        if is_playing() and not music_ducked:
+                            duck()
+                            music_ducked = True
+                    except Exception:
+                        pass
 
                     max_segment = (
                         INTERRUPT_MAX_SEGMENT_SECONDS
@@ -320,6 +335,7 @@ def listen_forever() -> None:
                                 interruption=(capture_mode == "interrupt"),
                             ),
                         )
+                        last_speech_or_send = time.monotonic()
                         speech_frames.clear()
                         segment_duration = 0.0
 
@@ -346,9 +362,18 @@ def listen_forever() -> None:
                                         interruption=(capture_mode == "interrupt"),
                                     ),
                                 )
+                                last_speech_or_send = time.monotonic()
                             speech_frames.clear()
                             segment_duration = 0.0
                             silence_duration = 0.0
+                    # Unduck musiikki kun hiljaisuus on tarpeeksi pitkä puheen jälkeen.
+                    if music_ducked and (now - last_speech_or_send) >= MUSIC_UNDUCK_SILENCE_SECONDS:
+                        try:
+                            from Tools.music import unduck
+                            unduck()
+                        except Exception:
+                            pass
+                        music_ducked = False
 
         except KeyboardInterrupt:
             if identity_watcher is not None:

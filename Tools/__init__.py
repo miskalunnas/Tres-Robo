@@ -87,7 +87,17 @@ def handle_speech(text: str) -> ToolExecutionResult:
             "What do you call a robot that takes the long way around? R2-Detour.",
         ]
         response = random.choice(jokes)
-    elif action in ("volume_up", "volume_down", "greeting", "help"):
+    elif action == "volume_up":
+        from .music import volume_up
+
+        vol = volume_up()
+        response = f"Volume set to {vol}%."
+    elif action == "volume_down":
+        from .music import volume_down
+
+        vol = volume_down()
+        response = f"Volume set to {vol}%."
+    elif action in ("greeting", "help"):
         pass
     else:
         execute(cmd)

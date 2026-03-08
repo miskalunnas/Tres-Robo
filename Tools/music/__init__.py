@@ -1,21 +1,23 @@
 """Music playback via yt-dlp and external player (ffplay / mpv).
 
 The bot is intended to use a YouTube Premium account for playback (better quality, no ads).
-Configure YT_COOKIES_FILE in .env to a cookies.txt path (Netscape format). Export from
-your browser while logged into YouTube Premium (e.g. "Get cookies.txt" / "cookies.txt" extension).
+Ducking: when someone talks while music plays, volume is lowered (mpv only; ffplay has no runtime volume).
 
 Requirements:
   - Python: yt-dlp (pip install yt-dlp; see requirements.txt).
   - System: ffplay (from ffmpeg) or mpv. On Raspberry Pi: sudo apt install ffmpeg.
+  - Ducking: mpv recommended (ffplay cannot change volume during playback).
   - .env: YT_COOKIES_FILE=/path/to/cookies.txt (YouTube Premium session).
 """
 
+import json
 import os
 import shutil
 import signal
 import subprocess
 import sys
 import threading
+import time
 from collections import deque
 
 try:
@@ -74,9 +76,14 @@ class MusicPlayer:
         self._process: subprocess.Popen | None = None
         self._paused: bool = False
         self._stopped: bool = False
+        self._volume: int = 80  # 0–100, käytetään seuraavassa soittokerrassa
+        self._current_query: str | None = None
         self._lock = threading.Lock()
         self._watcher: threading.Thread | None = None
         self._player_cmd: str | None = None
+        self._ipc_socket_path: str | None = None  # mpv IPC (ducking)
+        self._ducked: bool = False
+        self._saved_volume_before_duck: int = 80
         self._detect_player()
 
     # ------------------------------------------------------------------
@@ -89,6 +96,14 @@ class MusicPlayer:
                 self._player_cmd = cmd
                 return
         self._player_cmd = None
+
+    @staticmethod
+    def _mpv_ipc_path() -> str:
+        """Path/name for mpv IPC. Unix: socket path; Windows: pipe name (mpv creates \\\\.\\pipe\\<name>)."""
+        pid = os.getpid()
+        if os.name == "nt":
+            return "mpv-bot-" + str(pid)
+        return "/tmp/mpv-bot-" + str(pid)
 
     # ------------------------------------------------------------------
     # URL resolution (yt-dlp)
@@ -138,9 +153,18 @@ class MusicPlayer:
             return None
 
         if self._player_cmd == "ffplay":
-            args = ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet", url]
+            self._ipc_socket_path = None
+            vol = max(0.0, min(1.0, self._volume / 100.0))
+            args = ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet", "-volume", str(vol), url]
         else:
-            args = ["mpv", "--no-video", "--really-quiet", url]
+            # mpv: IPC for runtime ducking (volume change while playing)
+            self._ipc_socket_path = self._mpv_ipc_path()
+            args = [
+                "mpv", "--no-video", "--really-quiet",
+                "--volume=" + str(self._volume),
+                "--input-ipc-server=" + self._ipc_socket_path,
+                url,
+            ]
 
         kwargs: dict = {
             "stdout": subprocess.DEVNULL,
@@ -154,7 +178,10 @@ class MusicPlayer:
             kwargs["start_new_session"] = True
 
         try:
-            return subprocess.Popen(args, **kwargs)
+            proc = subprocess.Popen(args, **kwargs)
+            if self._player_cmd == "mpv":
+                time.sleep(0.3)  # IPC socket/pipe ready
+            return proc
         except Exception as e:
             print(f"[Music] Failed to start player: {e}", file=sys.stderr)
             return None
@@ -192,6 +219,7 @@ class MusicPlayer:
                 print("[Music] Queue is empty.")
                 return
             query = self._queue.popleft()
+            self._current_query = query
 
         print(f"[Music] Resolving: {query!r} ...")
         url = self._resolve_url(query)
@@ -229,6 +257,7 @@ class MusicPlayer:
             return False
 
         with self._lock:
+            self._current_query = query
             self._process = self._start_player(url)
             self._paused = False
 
@@ -309,6 +338,81 @@ class MusicPlayer:
         print("[Music] Stopped and queue cleared.")
         return had_process
 
+    def volume_up(self) -> int:
+        """Increase volume by 10 (0–100). Restarts current track if playing so change applies. Returns new volume."""
+        with self._lock:
+            self._volume = min(100, self._volume + 10)
+            if self._process and self._current_query:
+                self._queue.appendleft(self._current_query)
+        self._kill_current()
+        print(f"[Music] Volume up → {self._volume}%")
+        return self._volume
+
+    def volume_down(self) -> int:
+        """Decrease volume by 10 (0–100). Restarts current track if playing. Returns new volume."""
+        with self._lock:
+            self._volume = max(0, self._volume - 10)
+            if self._process and self._current_query:
+                self._queue.appendleft(self._current_query)
+        self._kill_current()
+        print(f"[Music] Volume down → {self._volume}%")
+        return self._volume
+
+    def get_volume(self) -> int:
+        """Return current volume 0–100."""
+        return self._volume
+
+    def is_playing(self) -> bool:
+        """True if music is currently playing (process running)."""
+        with self._lock:
+            return self._process is not None and not self._paused
+
+    DUCK_VOLUME = 12  # Volume % when ducked (puhe kuuluu paremmin)
+
+    def _mpv_send_volume(self, volume: int) -> bool:
+        """Send volume to mpv via IPC. Returns True on success."""
+        path = self._ipc_socket_path
+        if not path or self._player_cmd != "mpv":
+            return False
+        try:
+            msg = json.dumps({"command": ["set_property", "volume", volume]}) + "\n"
+            if os.name == "nt":
+                # Windows: named pipe \\.\pipe\<name>
+                pipe_path = r"\\.\pipe\" + path
+                with open(pipe_path, "wb") as f:
+                    f.write(msg.encode("utf-8"))
+            else:
+                import socket
+                sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                sock.settimeout(1.0)
+                sock.connect(path)
+                sock.sendall(msg.encode("utf-8"))
+                sock.close()
+            return True
+        except Exception as e:
+            print(f"[Music] IPC volume failed: {e}", file=sys.stderr)
+            return False
+
+    def duck(self) -> None:
+        """Lower volume a lot so speech is heard (mpv only). No-op if ffplay or not playing."""
+        with self._lock:
+            if self._process is None or self._player_cmd != "mpv" or self._ducked:
+                return
+            self._saved_volume_before_duck = self._volume
+            self._ducked = True
+        self._mpv_send_volume(self.DUCK_VOLUME)
+        print(f"[Music] Ducking → {self.DUCK_VOLUME}%")
+
+    def unduck(self) -> None:
+        """Restore volume after ducking (mpv only)."""
+        with self._lock:
+            if not self._ducked:
+                return
+            self._ducked = False
+            vol = self._saved_volume_before_duck
+        self._mpv_send_volume(vol)
+        print(f"[Music] Unduck → {vol}%")
+
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
@@ -319,6 +423,8 @@ class MusicPlayer:
             if proc is None:
                 return
             self._paused = False
+            self._ipc_socket_path = None
+            self._ducked = False
 
         if os.name != "nt":
             try:
@@ -396,3 +502,32 @@ def resume() -> bool:
 
 def stop() -> bool:
     return _player.stop()
+
+
+def volume_up() -> int:
+    """Increase volume; restarts current track if playing. Returns new volume 0–100."""
+    return _player.volume_up()
+
+
+def volume_down() -> int:
+    """Decrease volume; restarts current track if playing. Returns new volume 0–100."""
+    return _player.volume_down()
+
+
+def get_volume() -> int:
+    return _player.get_volume()
+
+
+def is_playing() -> bool:
+    """True if music is currently playing."""
+    return _player.is_playing()
+
+
+def duck() -> None:
+    """Lower music volume so speech is heard (mpv only)."""
+    _player.duck()
+
+
+def unduck() -> None:
+    """Restore music volume after ducking."""
+    _player.unduck()

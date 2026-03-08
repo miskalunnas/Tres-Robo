@@ -408,12 +408,14 @@ class ConversationEngine:
         self._active_reply_text = ""
 
     def _looks_like_clear_interrupt(self, text: str) -> bool:
+        """True vain jos käyttäjän lause on selkeästi tarkoituksellinen (ei taustamelua/pikkuääniä)."""
         normalized = text.lower().strip()
         if not normalized:
             return False
 
         words = re.findall(r"\w+", normalized)
-        if len(words) < 2 and len(normalized) < 8:
+        # Korkeampi kynnys: vähintään 4 sanaa ja 18 merkkiä, jotta lyhyt puhe/taustamelu ei keskeytä.
+        if len(words) < 4 and len(normalized) < 18:
             return False
 
         active_words = set(re.findall(r"\w+", self._active_reply_text.lower()))
@@ -430,7 +432,7 @@ class ConversationEngine:
         return self._text_looks_like_echo(text, self._active_reply_text)
 
     def _text_looks_like_echo(self, text: str, reference: str) -> bool:
-        """True if text is largely the same as reference (bot's own speech)."""
+        """True if text is largely the same as reference (bot's own speech). Kynnys 0.45 = enemmän kaikuja hylätään."""
         rem = text.lower().strip()
         ref = reference.lower()
         if not rem or not ref:
@@ -440,7 +442,7 @@ class ConversationEngine:
         if not words_rem:
             return False
         overlap = len(words_rem & words_ref) / len(words_rem)
-        if overlap >= 0.5:
+        if overlap >= 0.45:
             return True
         if len(rem) >= 8 and rem in ref:
             return True

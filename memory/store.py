@@ -378,12 +378,14 @@ class MemoryStore:
         )
 
     def search_knowledge(self, query: str, *, limit: int = 8) -> list[str]:
-        """Full-text search over the knowledge base. Returns list of content strings."""
+        """Full-text search over the knowledge base. Returns list of content strings.
+        Table should be seeded via scripts/seed_knowledge.py for TRES/SFP content.
+        """
         query = query.strip()
         if not query:
             return []
-        # FTS5: escape double-quotes and avoid empty MATCH
-        fts_query = query.replace('"', '""').strip()
+        # FTS5: escape double-quotes, truncate to avoid long-query issues
+        fts_query = query.replace('"', '""').strip()[:500]
         if not fts_query:
             return []
         try:
@@ -391,11 +393,12 @@ class MemoryStore:
                 """
                 SELECT k.content
                 FROM knowledge k
-                JOIN (
+                INNER JOIN (
                     SELECT rowid FROM knowledge_fts
                     WHERE knowledge_fts MATCH ?
                     LIMIT ?
                 ) f ON k.id = f.rowid
+                ORDER BY f.rowid
                 """,
                 (fts_query, limit),
             )

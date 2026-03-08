@@ -59,11 +59,13 @@ VOLUME_UP_KEYWORDS = (
     "turn it up", "volume up", "louder", "raise volume",
     "increase volume", "crank it up", "pump it up",
     "turn up the volume", "make it louder",
+    "äänenvoimakkuus ylös", "ääntä ylös", "kovemmalle", "kovempaa",
 )
 VOLUME_DOWN_KEYWORDS = (
     "turn it down", "volume down", "quieter", "lower volume",
     "decrease volume", "turn down the volume", "make it quieter",
     "not so loud", "too loud",
+    "äänenvoimakkuus alas", "ääntä alas", "hiljemmalle", "hiljempaa",
 )
 
 # Menu / lunch keywords — trigger a menu_check action.
