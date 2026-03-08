@@ -7,6 +7,7 @@ State machine:
 """
 import json
 import re
+import sys
 import threading
 import time
 
@@ -236,8 +237,26 @@ class ConversationEngine:
             payload={"wake_word": wake_word},
         )
         print("[Engine] Wake word detected — going ONLINE.")
+        threading.Thread(target=self._run_startup_vision, daemon=True).start()
         if announce:
             self._speak_reply("Hey! I'm listening.")
+
+    def _run_startup_vision(self) -> None:
+        """Capture a frame at session start to identify who's in the room."""
+        try:
+            from vision.camera import Camera
+            from vision.identity_manager import FaceManager
+            with Camera(warmup_seconds=0.5) as cam:
+                frame = cam.capture()
+            names = FaceManager.get().recognize_faces(frame)
+            if names:
+                context = "Huoneessa tunnistettu: " + ", ".join(names) + "."
+            else:
+                context = "Kamerassa ei tunnistettuja henkilöitä."
+            print(f"[Vision] Startup scan: {context}")
+            self._brain.set_startup_context(context)
+        except Exception as exc:
+            print(f"[Vision] Startup scan failed: {exc}", file=sys.stderr)
 
     def _end_session(self, reason: str) -> None:
         with self._lock:

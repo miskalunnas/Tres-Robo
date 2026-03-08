@@ -169,6 +169,7 @@ class Brain:
         )
         self._store = store
         self._history: list[dict] = []
+        self._startup_context: str = ""
         self._reset_history()
         print(f"[Brain] Using model: {MODEL}")
 
@@ -472,8 +473,14 @@ class Brain:
                 confidence=confidence_value,
             )
 
+    def set_startup_context(self, text: str) -> None:
+        """Inject context captured at session start (e.g. who the camera recognized)."""
+        self._startup_context = text
+        print(f"[Brain] Startup context: {text}")
+
     def reset(self) -> None:
         """Clear conversation history. Call when a session ends."""
+        self._startup_context = ""
         self._reset_history()
         print("[Brain] Conversation reset.")
 
@@ -496,6 +503,8 @@ class Brain:
             return self._history
 
         messages: list[dict] = [{"role": "system", "content": SYSTEM_PROMPT}]
+        if self._startup_context:
+            messages.append({"role": "system", "content": f"Aloituskuva (kamera sessioalussa): {self._startup_context}"})
         prev_summary = self._store.get_previous_session_summary(
             person_id, exclude_session_id=session_id
         )

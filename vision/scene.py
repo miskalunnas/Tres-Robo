@@ -31,12 +31,11 @@ def capture_and_describe(question: str, client) -> str:
     print(f"[Vision] Debug frame saved to /tmp/vision_debug.jpg (shape={frame.shape})")
 
     # Face recognition — runs in-memory, fast, gracefully skipped if not installed.
-    identity_hint = ""
+    names: list[str] = []
     try:
         from vision.identity_manager import FaceManager
         names = FaceManager.get().recognize_faces(frame)
         if names:
-            identity_hint = "Tunnistetut henkilöt kuvassa: " + ", ".join(names) + ". "
             print(f"[Vision] Recognized: {names}")
         else:
             print("[Vision] No known faces recognized.")
@@ -49,7 +48,8 @@ def capture_and_describe(question: str, client) -> str:
         return "Kuvan koodaus epäonnistui."
     b64 = base64.b64encode(buf.tobytes()).decode()
 
-    # Prepend any identity context to the question so the Vision model can use it.
+    # Prepend identity hint to question so Vision model has context while answering.
+    identity_hint = ("Tunnistetut henkilöt kuvassa: " + ", ".join(names) + ". ") if names else ""
     prompt = identity_hint + question
 
     try:
@@ -73,7 +73,13 @@ def capture_and_describe(question: str, client) -> str:
             max_tokens=120,
             timeout=15,
         )
-        return (resp.choices[0].message.content or "").strip()
+        description = (resp.choices[0].message.content or "").strip()
+        # Always prefix recognized names in the returned string so the bot can't miss them.
+        if names:
+            return "Huoneessa on: " + ", ".join(names) + ". " + description
+        return description
     except Exception as exc:
         print(f"[Vision] API error: {exc}", file=sys.stderr)
+        if names:
+            return "Huoneessa on: " + ", ".join(names) + "."
         return "En pystynyt analysoimaan kuvaa."
