@@ -1,4 +1,5 @@
 """Camera abstraction — tries picamera2 (Pi Camera Module) first, falls back to OpenCV."""
+import sys
 import time
 from types import TracebackType
 
@@ -53,18 +54,25 @@ class Camera:
             self._cam = cam
             self._backend = "picamera2"
             print("[Camera] Using picamera2 (Pi Camera Module)")
-        except (ImportError, Exception):
-            import cv2  # type: ignore[import]
+        except ImportError:
+            print("[Camera] picamera2 not installed — falling back to OpenCV USB webcam.", file=sys.stderr)
+            self._open_opencv()
+        except Exception as exc:
+            print(f"[Camera] picamera2 failed ({exc}) — falling back to OpenCV USB webcam.", file=sys.stderr)
+            self._open_opencv()
 
-            cap = cv2.VideoCapture(0)
-            if not cap.isOpened():
-                raise RuntimeError(
-                    "No camera found. Install picamera2 or connect a USB webcam."
-                )
-            time.sleep(self._warmup)
-            self._cap = cap
-            self._backend = "opencv"
-            print("[Camera] Using OpenCV (USB/webcam fallback)")
+    def _open_opencv(self) -> None:
+        import cv2  # type: ignore[import]
+
+        cap = cv2.VideoCapture(0)
+        if not cap.isOpened():
+            raise RuntimeError(
+                "No camera found. Install picamera2 or connect a USB webcam."
+            )
+        time.sleep(self._warmup)
+        self._cap = cap
+        self._backend = "opencv"
+        print("[Camera] Using OpenCV (USB/webcam fallback)")
 
     def _close(self) -> None:
         if self._cam is not None:
