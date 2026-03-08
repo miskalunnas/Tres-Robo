@@ -3,7 +3,7 @@
 State machine:
   OFFLINE: listens for wake word, ignores everything else.
   ONLINE:  passes every utterance to the LLM and speaks the reply.
-           Returns to OFFLINE on inactivity timeout or a goodbye phrase.
+           Returns to OFFLINE on inactivity timeout or a clear end-of-chat intent.
 """
 import json
 import re
@@ -27,7 +27,24 @@ WAKE_WORDS = [
     "founderbotti",
     "hei robotti",
 ]
-GOODBYE_WORDS = ["goodbye", "bye", "näkemiin", "hei hei", "moi moi", "stop listening"]
+SESSION_END_PATTERNS = (
+    re.compile(r"\b(?:goodbye|bye(?: bye)?|näkemiin|hei hei|moi moi)\b"),
+    re.compile(
+        r"\b(?:see you(?: later)?|talk to you later|catch you later|talk later)\b"
+    ),
+    re.compile(
+        r"\b(?:go offline|go idle|go to sleep|sleep now|stop listening|you can stop listening|you can sleep|you can go to sleep)\b"
+    ),
+    re.compile(
+        r"\b(?:mene lepotilaan|siirry lepotilaan|mene nukkumaan|voit mennä nukkumaan|voit mennä lepotilaan)\b"
+    ),
+    re.compile(
+        r"\b(?:that's all(?: for now)?|that is all(?: for now)?|that's everything|that is everything|we(?: are|'re) done|i(?: am|'m) done(?: for now)?|done for now|nothing else|no more questions|all good now)\b"
+    ),
+    re.compile(
+        r"\b(?:siinä kaikki|tässä kaikki|ei muuta|ei muuta tällä erää|ollaan valmiita|se oli siinä|palataan myöhemmin|jutellaan myöhemmin|puhutaan myöhemmin|jatketaan myöhemmin)\b"
+    ),
+)
 INTERRUPT_WORDS = [
     "stop",
     "stop talking",
@@ -88,8 +105,16 @@ class ConversationEngine:
             normalized = text.lower()
             matched_wake_word = next((word for word in WAKE_WORDS if word in normalized), None)
             matched_interrupt = next((word for word in INTERRUPT_WORDS if word in normalized), None)
+            matched_session_end = self._is_session_end_intent(text)
             local_command = parse_command(text)
             clear_interrupt = self._looks_like_clear_interrupt(text)
+            if matched_session_end:
+                print(f"[Interrupt heard] {text}")
+                self._cancel_active_reply_locked()
+                interrupt_speech()
+                self._last_activity = now
+                self._speak_reply("Okay, going offline.", end_session_reason="goodbye")
+                return True
             if (
                 not matched_wake_word
                 and not matched_interrupt
@@ -180,8 +205,7 @@ class ConversationEngine:
         print(f"You said: {text}")
         self._log_user_message(text)
 
-        normalized = text.lower()
-        if any(w in normalized for w in GOODBYE_WORDS):
+        if self._is_session_end_intent(text):
             self._speak_reply("Okay, going offline.", end_session_reason="goodbye")
             return
 
@@ -400,6 +424,18 @@ class ConversationEngine:
         stripped = pattern.sub("", text, count=1)
         return stripped.strip(" ,.!?:;-")
 
+    def _is_session_end_intent(self, text: str) -> bool:
+        normalized = self._normalize_intent_text(text)
+        if not normalized:
+            return False
+        if "stop listening to" in normalized:
+            return False
+        return any(pattern.search(normalized) for pattern in SESSION_END_PATTERNS)
+
+    @staticmethod
+    def _normalize_intent_text(text: str) -> str:
+        return re.sub(r"\s+", " ", text.lower()).strip()
+
     def _cancel_active_reply_locked(self) -> None:
         if self._reply_cancel_event is not None:
             self._reply_cancel_event.set()
@@ -414,8 +450,8 @@ class ConversationEngine:
             return False
 
         words = re.findall(r"\w+", normalized)
-        # Korkeampi kynnys: vähintään 4 sanaa ja 18 merkkiä, jotta lyhyt puhe/taustamelu ei keskeytä.
-        if len(words) < 4 and len(normalized) < 18:
+        # Korkeampi kynnys: vähintään 5 sanaa ja 22 merkkiä, jotta botti ei keskeydy liian helposti.
+        if len(words) < 5 and len(normalized) < 22:
             return False
 
         active_words = set(re.findall(r"\w+", self._active_reply_text.lower()))

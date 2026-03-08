@@ -35,13 +35,13 @@ VAD_FRAME_DURATION_MS = 30
 
 # Segmenting: how much audio to collect before sending to Whisper.
 # Pienempi MIN = lyhyet herätyssanat ("hei bot", "founderbot") pääsevät Whisperiin.
-MIN_SEGMENT_SECONDS = 0.3
+MIN_SEGMENT_SECONDS = 0.5
 MAX_SEGMENT_SECONDS = 8.0
-# Hiljaisuus ennen kuin lähetetään Whisperille: pienempi = nopeampi vastaus, isompi = vähemmän vähän puhetta leikataan.
-MAX_SILENCE_BETWEEN_SPEECH_SECONDS = 0.5
+# Hiljaisuus ennen kuin lähetetään Whisperille: isompi = botti ei puhu päälle, pienempi = nopeampi vastaus.
+MAX_SILENCE_BETWEEN_SPEECH_SECONDS = 0.9
 
 # Interruption capture: korkeampi kynnys = botti ei keskeydy taustamelusta tai lyhyistä äänistä.
-INTERRUPT_MIN_SEGMENT_SECONDS = 0.75
+INTERRUPT_MIN_SEGMENT_SECONDS = 1.0
 INTERRUPT_MAX_SEGMENT_SECONDS = 3.0
 INTERRUPT_MAX_SILENCE_BETWEEN_SPEECH_SECONDS = 0.5
 
@@ -61,7 +61,7 @@ WHISPER_PROMPT = (
     "Ruokalista, lounaslista, mitä ruokana, reaktori, newton, menu, lunch. "
     "Moi, hei, moro, terve, moikka, päivää, kiitos, joo, ei, kyllä, selvä. "
     "Miten voit, pöhinä, pöhinää, voisitko, kerro, mitä, miksi, milloin, missä, mikä, kuka, apua, mitä osaat. "
-    "Näkemiin, hei hei, moi moi, goodbye, bye."
+    "Näkemiin, hei hei, moi moi, goodbye, bye, siinä kaikki, ei muuta, palataan myöhemmin, mene lepotilaan."
 )
 
 

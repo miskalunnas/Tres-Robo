@@ -1,8 +1,4 @@
-"""Menu checker tool — fetches today's lunch menu from Tampere campus
-restaurants via the Unisafka.fi static JSON API.
-
-Supported restaurants: Reaktori, Newton, Konehuone, Hertsi
-"""
+"""Menu checker tool for Hervanta campus lunch menus via Unisafka."""
 
 import sys
 from datetime import date
@@ -12,11 +8,11 @@ import requests
 UNISAFKA_BASE = "https://unisafka.fi/static/json"
 CAMPUS = "tty"
 
-RESTAURANT_KEYS: dict[str, str] = {
-    "reaktori": "res_reaktori",
-    "newton": "res_newton",
-    "konehuone": "res_konehuone",
-    "hertsi": "res_hertsi",
+RESTAURANT_KEYS: dict[str, tuple[str, ...]] = {
+    "reaktori": ("res_reaktori", "res_reaktori_iltaruoka"),
+    "newton": ("res_newton",),
+    "konehuone": ("res_konehuone", "res_newton_soos", "res_newton_fusion"),
+    "hertsi": ("res_hertsi",),
 }
 
 RESTAURANT_DISPLAY: dict[str, str] = {
@@ -30,9 +26,20 @@ ALIASES: dict[str, str] = {
     "food & co": "reaktori",
     "food and co": "reaktori",
     "foodco": "reaktori",
+    "fazer": "reaktori",
+    "break cafe": "reaktori",
     "cafe konehuone": "konehuone",
     "café konehuone": "konehuone",
 }
+
+RESTAURANT_NAME_HINTS: dict[str, tuple[str, ...]] = {
+    "reaktori": ("reaktori",),
+    "newton": ("newton",),
+    "konehuone": ("konehuone",),
+    "hertsi": ("hertsi",),
+}
+
+_DAYS_FI = ("ma", "ti", "ke", "to", "pe", "la", "su")
 
 
 def _resolve_name(name: str) -> str | None:
@@ -48,50 +55,118 @@ def _week_number() -> int:
     return date.today().isocalendar().week
 
 
-_DAYS_FI = ("ma", "ti", "ke", "to", "pe", "la", "su")
+def _fetch_json(url: str) -> dict:
+    """Fetch JSON from *url* and raise on HTTP errors."""
+    response = requests.get(url, timeout=10)
+    response.raise_for_status()
+    return response.json()
 
 
 def _fetch_day_data() -> dict:
-    """Fetch the full Unisafka JSON for today."""
-    year = date.today().year
+    """Fetch today's Unisafka JSON payload."""
+    today = date.today()
+    year = today.year
     week = _week_number()
+    day = _DAYS_FI[today.weekday()]
 
     v_url = f"{UNISAFKA_BASE}/{year}/{week}/v.json"
-    r = requests.get(v_url, timeout=10)
-    r.raise_for_status()
-    version = r.json()["v"]
+    version_data = _fetch_json(v_url)
+    version = str(version_data.get("v", "")).strip()
+    if not version:
+        raise ValueError(f"Missing version in {v_url}")
 
-    day = _DAYS_FI[date.today().weekday()]
     menu_url = f"{UNISAFKA_BASE}/{year}/{week}/{version}/{day}.json"
-    r = requests.get(menu_url, timeout=10)
-    r.raise_for_status()
-    return r.json()
+    return _fetch_json(menu_url)
 
 
-def _parse_restaurant(data: dict, res_key: str) -> list[str]:
-    """Extract formatted menu lines for one restaurant from Unisafka JSON."""
-    restaurants = data.get(f"restaurants_{CAMPUS}", {})
-    rest = restaurants.get(res_key)
-    if not rest:
-        return []
+def _get_restaurants(data: dict) -> dict[str, dict]:
+    return data.get(f"restaurants_{CAMPUS}", {})
+
+
+def _find_restaurant_entries(data: dict, key: str) -> list[dict]:
+    """Return matching restaurant entries for a canonical restaurant name."""
+    restaurants = _get_restaurants(data)
+    matches: list[dict] = []
+    seen: set[str] = set()
+
+    for res_key in RESTAURANT_KEYS[key]:
+        rest = restaurants.get(res_key)
+        if rest:
+            matches.append(rest)
+            seen.add(res_key)
+
+    if matches:
+        return matches
+
+    hints = RESTAURANT_NAME_HINTS[key]
+    for res_key, rest in restaurants.items():
+        if res_key in seen:
+            continue
+        name = (rest.get("restaurant") or "").lower()
+        if any(hint in name for hint in hints):
+            matches.append(rest)
+
+    return matches
+
+
+def _format_meal_lines(rest: dict, *, include_restaurant_name: bool) -> list[str]:
+    """Extract formatted lines for one Unisafka restaurant object."""
+    restaurant_name = (rest.get("restaurant") or "Unknown restaurant").strip()
+    meal_indent = "    " if include_restaurant_name else "  "
+    item_indent = "      " if include_restaurant_name else "    "
+
     if not rest.get("open_today", False):
+        if include_restaurant_name:
+            return [f"  {restaurant_name}: Closed today."]
         return ["  Closed today."]
 
     lines: list[str] = []
+    if include_restaurant_name:
+        lines.append(f"  {restaurant_name}:")
+
     for meal in rest.get("meals", []):
-        category = meal.get("kok", "")
+        category = (meal.get("kok") or "").strip()
         items = meal.get("mo", [])
         if category:
-            lines.append(f"  {category}:")
+            lines.append(f"{meal_indent}{category}:")
         for item in items:
-            name = item.get("mpn", "").strip()
-            diets = item.get("mpd", "")
-            if name:
-                entry = f"    {name}"
-                if diets:
-                    entry += f" ({diets})"
-                lines.append(entry)
+            name = (item.get("mpn") or "").strip()
+            diets = (item.get("mpd") or "").strip()
+            if not name:
+                continue
+            entry = f"{item_indent}{name}"
+            if diets:
+                entry += f" ({diets})"
+            lines.append(entry)
+
+    if include_restaurant_name and len(lines) == 1:
+        lines.append(f"{meal_indent}No menu available.")
+
     return lines
+
+
+def _parse_restaurant(data: dict, key: str) -> list[str]:
+    """Extract formatted menu lines for a canonical restaurant key."""
+    matches = _find_restaurant_entries(data, key)
+    if not matches:
+        return []
+
+    include_restaurant_name = len(matches) > 1
+    lines: list[str] = []
+    for index, rest in enumerate(matches):
+        block = _format_meal_lines(rest, include_restaurant_name=include_restaurant_name)
+        if not block:
+            continue
+        if lines and include_restaurant_name and index > 0:
+            lines.append("")
+        lines.extend(block)
+    return lines
+
+
+def _menu_fetch_error(display: str | None = None) -> str:
+    if display:
+        return f"Failed to fetch menu for {display}. Check unisafka.fi."
+    return "Failed to fetch menus. Check unisafka.fi."
 
 
 def get_menu(restaurant: str) -> str:
@@ -101,19 +176,22 @@ def get_menu(restaurant: str) -> str:
         available = ", ".join(RESTAURANT_DISPLAY.values())
         return f"Unknown restaurant: '{restaurant}'. Options: {available}"
 
-    res_key = RESTAURANT_KEYS[key]
     display = RESTAURANT_DISPLAY[key]
 
     try:
         data = _fetch_day_data()
+    except requests.HTTPError as exc:
+        status = getattr(exc.response, "status_code", "unknown")
+        print(f"[Menu] HTTP {status} while fetching {display}: {exc}", file=sys.stderr)
+        return _menu_fetch_error(display)
     except requests.RequestException as exc:
-        print(f"[Menu] HTTP error: {exc}", file=sys.stderr)
-        return f"Failed to fetch menu for {display}."
+        print(f"[Menu] Request error while fetching {display}: {exc}", file=sys.stderr)
+        return _menu_fetch_error(display)
     except Exception as exc:
-        print(f"[Menu] Unexpected error: {exc}", file=sys.stderr)
-        return f"Failed to fetch menu for {display}."
+        print(f"[Menu] Unexpected error while fetching {display}: {exc}", file=sys.stderr)
+        return _menu_fetch_error(display)
 
-    lines = _parse_restaurant(data, res_key)
+    lines = _parse_restaurant(data, key)
     if not lines:
         return f"No menu found for {display} today."
 
@@ -122,20 +200,24 @@ def get_menu(restaurant: str) -> str:
 
 
 def get_all_menus() -> str:
-    """Fetch today's lunch menus for all restaurants."""
+    """Fetch today's lunch menus for all supported restaurants."""
     try:
         data = _fetch_day_data()
+    except requests.HTTPError as exc:
+        status = getattr(exc.response, "status_code", "unknown")
+        print(f"[Menu] HTTP {status} while fetching all menus: {exc}", file=sys.stderr)
+        return _menu_fetch_error()
     except requests.RequestException as exc:
-        print(f"[Menu] HTTP error: {exc}", file=sys.stderr)
-        return "Failed to fetch menus."
+        print(f"[Menu] Request error while fetching all menus: {exc}", file=sys.stderr)
+        return _menu_fetch_error()
     except Exception as exc:
-        print(f"[Menu] Unexpected error: {exc}", file=sys.stderr)
-        return "Failed to fetch menus."
+        print(f"[Menu] Unexpected error while fetching all menus: {exc}", file=sys.stderr)
+        return _menu_fetch_error()
 
     parts: list[str] = []
-    for key, res_key in RESTAURANT_KEYS.items():
+    for key in RESTAURANT_DISPLAY:
         display = RESTAURANT_DISPLAY[key]
-        lines = _parse_restaurant(data, res_key)
+        lines = _parse_restaurant(data, key)
         if lines:
             parts.append(f"{display}:\n" + "\n".join(lines))
         else:

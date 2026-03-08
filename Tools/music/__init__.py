@@ -45,7 +45,7 @@ def check_music_ready() -> bool:
         pass
 
     player = None
-    for cmd in ("ffplay", "mpv"):
+    for cmd in ("mpv", "ffplay"):
         if shutil.which(cmd):
             player = cmd
             break
@@ -91,7 +91,8 @@ class MusicPlayer:
     # ------------------------------------------------------------------
 
     def _detect_player(self) -> None:
-        for cmd in ("ffplay", "mpv"):
+        # Prefer mpv (ducking via IPC); fallback to ffplay
+        for cmd in ("mpv", "ffplay"):
             if shutil.which(cmd):
                 self._player_cmd = cmd
                 return
@@ -144,7 +145,7 @@ class MusicPlayer:
     # Subprocess launch
     # ------------------------------------------------------------------
 
-    def _start_player(self, url: str) -> subprocess.Popen | None:
+    def _start_player(self, url: str, *, use_ipc: bool = True) -> subprocess.Popen | None:
         if not self._player_cmd:
             print(
                 "[Music] No player found. Install ffmpeg or mpv: sudo apt install ffmpeg  OR  sudo apt install mpv",
@@ -154,17 +155,26 @@ class MusicPlayer:
 
         if self._player_cmd == "ffplay":
             self._ipc_socket_path = None
-            vol = max(0.0, min(1.0, self._volume / 100.0))
+            # ffplay -volume: 0–256 (256 = 100%), not 0–1
+            vol = max(0, min(256, int(self._volume / 100.0 * 256)))
             args = ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet", "-volume", str(vol), url]
         else:
-            # mpv: IPC for runtime ducking (volume change while playing)
-            self._ipc_socket_path = self._mpv_ipc_path()
-            args = [
-                "mpv", "--no-video", "--really-quiet",
-                "--volume=" + str(self._volume),
-                "--input-ipc-server=" + self._ipc_socket_path,
-                url,
-            ]
+            # mpv: IPC vain duckingia varten; jos käynnistys epäonnistuu, yritä ilman IPC
+            if use_ipc:
+                self._ipc_socket_path = self._mpv_ipc_path()
+                args = [
+                    "mpv", "--no-video", "--really-quiet",
+                    "--volume=" + str(self._volume),
+                    "--input-ipc-server=" + self._ipc_socket_path,
+                    url,
+                ]
+            else:
+                self._ipc_socket_path = None
+                args = [
+                    "mpv", "--no-video", "--really-quiet",
+                    "--volume=" + str(self._volume),
+                    url,
+                ]
 
         kwargs: dict = {
             "stdout": subprocess.DEVNULL,
@@ -179,8 +189,11 @@ class MusicPlayer:
 
         try:
             proc = subprocess.Popen(args, **kwargs)
-            if self._player_cmd == "mpv":
+            if self._player_cmd == "mpv" and use_ipc:
                 time.sleep(0.3)  # IPC socket/pipe ready
+                if proc.poll() is not None:
+                    # mpv lähti pois heti (esim. IPC ei tuettu) → yritä ilman IPC
+                    return self._start_player(url, use_ipc=False)
             return proc
         except Exception as e:
             print(f"[Music] Failed to start player: {e}", file=sys.stderr)
