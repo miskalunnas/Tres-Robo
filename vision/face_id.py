@@ -32,7 +32,8 @@ def detect(frame_bgr: np.ndarray) -> list[tuple[int, int, int, int]]:
     at the cost of ~3x more compute.
     """
     _require_fr()
-    frame_rgb = frame_bgr[:, :, ::-1]  # BGR → RGB
+    # np.ascontiguousarray ensures dlib gets a C-contiguous array ([::-1] gives a view)
+    frame_rgb = np.ascontiguousarray(frame_bgr[:, :, ::-1])  # BGR → RGB
     return fr.face_locations(frame_rgb, model="hog")
 
 
@@ -42,7 +43,7 @@ def encode(
 ) -> list[np.ndarray]:
     """Return 128-d face embeddings for the given face locations."""
     _require_fr()
-    frame_rgb = frame_bgr[:, :, ::-1]
+    frame_rgb = np.ascontiguousarray(frame_bgr[:, :, ::-1])
     return fr.face_encodings(frame_rgb, known_face_locations=locations)
 
 
