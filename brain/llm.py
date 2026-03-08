@@ -109,7 +109,7 @@ LLM_TOOLS = [
         "type": "function",
         "function": {
             "name": "lookup_knowledge",
-            "description": "Search the knowledge base ONLY when context above lacks the answer. Use for specific facts about TRES, SFP, Robolabs, people, or commands. Do NOT call for greetings, music, time, or when you already have the info.",
+            "description": "Search the knowledge base when you need facts. Call this when context above doesn't have the answer. Use query like 'TRES', 'SFP', 'robolabs', 'bot_persona', 'Lauri', 'isäntä'. Always use the returned info in your reply.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -455,28 +455,13 @@ class Brain:
                     "content": f"Edellinen istunto (yhteenveto): {prev_summary}",
                 }
             )
-        # Muisti aina; tietopohja vain kun viesti viittaa TRES/SFP/persona-aiheisiin
-        _KNOWLEDGE_TRIGGERS = frozenset([
-            "tres", "sfp", "summer founder", "robolabs", "robolab",
-            "kahvi", "coffee", "3d", "3d-tulostin", "printer",
-            "konsultti", "consultant", "kova labs", "demo day",
-            "tampere", "yhteisö", "community", "ohjelma", "program",
-            "häviäj", "builder", "build with", "navigator", "excu",
-            "isäntä", "raba", "röbö", "pöhinä", "founderi",
-            "netta", "jooel", "miska", "oliver", "arttu", "jani",
-            "lauri", "smoothlage", "olli", "miro",
-            "mikä", "mitä", "miten", "kuka", "milloin", "missä",
-        ])
-        text_lower = user_text.strip().lower()
-        may_need_knowledge = len(text_lower) >= 3 and any(
-            t in text_lower for t in _KNOWLEDGE_TRIGGERS
-        )
+        # Muisti aina; tietopohja aina (botti tarvitsee persoonan ja faktat)
         context_text = self._store.get_context_as_text(
             user_text,
             person_id=person_id,
-            knowledge_limit=6,
+            knowledge_limit=8,
             memory_limit=5,
-            include_knowledge=may_need_knowledge,
+            include_knowledge=True,
         )
         if context_text:
             messages.append(
@@ -489,8 +474,9 @@ class Brain:
             {
                 "role": "system",
                 "content": (
-                    "Käytä lookup_knowledge vain jos kontekstissa ei ole vastausta "
-                    "ja tarvitset faktoja (TRES, SFP, Robolabs, henkilöt). Älä kutsu turhaan."
+                    "Kun kontekstissa ei ole vastausta, käytä lookup_knowledge-työkalua "
+                    "(query = hakusana, esim. 'TRES', 'SFP', 'robolabs', 'bot_persona', 'Lauri'). "
+                    "Vastaa aina kontekstin tai tietopohjan perusteella."
                 ),
             }
         )

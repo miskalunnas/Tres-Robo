@@ -400,10 +400,10 @@ class MemoryStore:
         except sqlite3.OperationalError:
             pass
         # Fallback: LIKE search (works when FTS5 not available, e.g. Raspberry Pi)
-        terms = [t.strip() for t in query.split() if len(t.strip()) >= 2][:5]
+        terms = [t.strip() for t in query.split() if len(t.strip()) >= 2][:6]
         if not terms:
             return []
-        like_clause = " AND ".join(
+        like_clause = " OR ".join(
             "(k.content LIKE ? OR k.source LIKE ?)" for _ in terms
         )
         params = []
@@ -473,9 +473,10 @@ class MemoryStore:
         if memory:
             parts.append("Muisti (käyttäjä/istunto):\n" + memory)
         if include_knowledge:
-            hits = self.search_knowledge(query, limit=knowledge_limit)
+            search_query = (query.strip() + " persona TRES").strip()
+            hits = self.search_knowledge(search_query, limit=knowledge_limit)
             if hits:
-                parts.append("Tietopohja:\n" + "\n\n".join(hits))
+                parts.append("Tietopohja (käytä tätä vastataksesi):\n" + "\n\n".join(hits))
         return "\n\n".join(parts) if parts else ""
 
     # ------------------------------------------------------------------

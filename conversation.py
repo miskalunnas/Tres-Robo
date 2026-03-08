@@ -93,9 +93,11 @@ class ConversationEngine:
                 if not matched_wake_word:
                     return
                 remainder = self._strip_phrase(text, matched_wake_word)
-                self._start_session(now, matched_wake_word, announce=not bool(remainder))
-                if remainder:
-                    self._process_online_text(remainder, now=now)
+                has_followup = bool(remainder.strip())
+                # Jos vain herätyssana: ei "Hey I'm listening", vaan LLM vastaa persoonalla (mitä isäntä)
+                text_to_process = remainder.strip() if has_followup else "mitä isäntä"
+                self._start_session(now, matched_wake_word, announce=False)
+                self._process_online_text(text_to_process, now=now)
                 return
 
             self._process_online_text(text, now=now)
