@@ -16,7 +16,7 @@ Priority order:
 # Prefix keywords: the rest of the text after the keyword is the query.
 # Longer prefixes first so "play music" is not eaten by bare "play".
 PLAY_PREFIXES = (
-    "put on some", "put on",
+    "put on some", "put on", "soita jotain", "soita musiikki", "soita",
     "play music", "play a song", "play song", "play some", "play me",
     "i want to hear", "i want to listen to", "i wanna hear",
     "let's listen to", "lets listen to",
@@ -24,7 +24,7 @@ PLAY_PREFIXES = (
     "play",
 )
 QUEUE_PREFIXES = (
-    "add to queue", "add to the queue",
+    "add to queue", "add to the queue", "lisää jonoon", "lisää listaan",
     "queue up", "put in queue", "put in the queue",
     "enqueue", "queue",
 )
@@ -34,23 +34,25 @@ SKIP_KEYWORDS = (
     "next song", "next track", "skip this song", "skip this track",
     "skip song", "skip track", "skip this", "skip it",
     "play next", "go to next", "move to next",
+    "seuraava kappale", "seuraava biisi", "seuraava", "seuraavaksi",
     "skip", "next",
 )
 PAUSE_KEYWORDS = (
     "pause music", "pause the music", "pause song", "pause the song",
-    "pause playback", "hold the music",
+    "pause playback", "hold the music", "tauko", "pauseta", "pausetta",
     "pause",
 )
 RESUME_KEYWORDS = (
     "resume music", "resume the music", "resume song", "resume playback",
     "continue playing", "continue the music", "keep playing",
-    "unpause", "un-pause",
+    "unpause", "un-pause", "jatka", "jatka musiikki", "jatka soitto",
     "resume",
 )
 STOP_KEYWORDS = (
     "stop music", "stop the music", "stop playing", "stop the song",
     "stop playback", "turn off music", "turn off the music",
     "kill the music", "cut the music", "silence",
+    "lopeta", "lopeta musiikki", "lopeta soitto", "musiikki pois",
     "stop",
 )
 VOLUME_UP_KEYWORDS = (
@@ -75,7 +77,7 @@ MENU_KEYWORDS = (
     "ruokalista", "lounaslista", "päivän ruoka", "paivan ruoka",
     "päivän lounas", "paivan lounas", "mitä ruuaksi", "mita ruuaksi",
     "mitä lounaaksi", "mita lounaaksi", "mitä on ruokana", "mita on ruokana",
-    "mitä on lounaalla", "mita on lounaalla",
+    "mitä on lounaalla", "mita on lounaalla", "mitä ruokana", "mita ruokana",
     "lunch", "menu",
 )
 RESTAURANT_ALIASES: dict[str, str] = {
@@ -105,6 +107,7 @@ GREETING_KEYWORDS = (
     "hello", "hey", "hi there", "howdy", "good morning",
     "good afternoon", "good evening", "what's up", "whats up",
     "how are you", "how's it going", "hows it going",
+    "moi", "hei", "terve", "moro", "moikka", "päivää", "paivaa",
     "hi",
 )
 
@@ -112,13 +115,15 @@ GREETING_KEYWORDS = (
 HELP_KEYWORDS = (
     "what can you do", "help me", "show commands",
     "what are your commands", "list commands",
-    "what do you do", "help",
+    "what do you do", "help", "apua", "mitä osaat", "mita osaat",
 )
 
 # Time
 TIME_KEYWORDS = (
     "what time is it", "what's the time", "whats the time",
     "tell me the time", "current time",
+    "paljonko kello on", "mitä kello on", "mita kello on",
+    "mitä kello", "mita kello", "kello",
     "time",
 )
 
@@ -126,6 +131,7 @@ TIME_KEYWORDS = (
 JOKE_KEYWORDS = (
     "tell me a joke", "say something funny", "make me laugh",
     "got a joke", "do you know a joke", "know any jokes",
+    "kerro vitsi", "vitsi", "vitsiä", "vitsia",
     "joke",
 )
 

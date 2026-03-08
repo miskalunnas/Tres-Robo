@@ -445,7 +445,7 @@ class Brain:
             t in text_lower for t in _KNOWLEDGE_TRIGGERS
         )
         knowledge_hits = (
-            self._store.search_knowledge(user_text, limit=8)
+            self._store.search_knowledge(user_text, limit=4)
             if may_need_knowledge
             else []
         )
@@ -460,7 +460,7 @@ class Brain:
                     ),
                 }
             )
-        messages.extend(self._store.get_session_messages(session_id, limit=20))
+        messages.extend(self._store.get_session_messages(session_id, limit=12))
         return messages
 
     def _reset_history(self) -> None:

@@ -17,18 +17,17 @@ from Tools.commands import parse_command
 from voice.tts import SpeechHandle, interrupt as interrupt_speech, speak
 
 WAKE_WORDS = [
-    # Intended wake word + common Whisper mis-transcriptions
     "founderbot",
     "founderbott",
     "founder bot",
     "found a bot",
     "founder bott",
-    # Finnish alternatives
     "hei botti",
+    "hei bot",
     "founderbotti",
     "hei robotti",
 ]
-GOODBYE_WORDS = ["goodbye", "bye", "näkemiin", "hei hei", "stop listening"]
+GOODBYE_WORDS = ["goodbye", "bye", "näkemiin", "hei hei", "moi moi", "stop listening"]
 INTERRUPT_WORDS = [
     "stop",
     "stop talking",

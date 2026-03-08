@@ -20,14 +20,17 @@ from voice.tts import is_busy
 # Rate expected by webrtcvad and Whisper. Capture may differ — we resample.
 VAD_SAMPLE_RATE = 16_000
 
-# Voice activity detection settings.
-VAD_FRAME_DURATION_MS = 30   # 10, 20 or 30 ms are valid
-VAD_AGGRESSIVENESS = 1        # 0–3; lower = more sensitive (less cutting off speech)
+# VAD: 0 = herkimmin (ei leikkaa puhetta), 3 = vahvin (voi missata hiljaista puhetta).
+VAD_AGGRESSIVENESS = 0
+
+# VAD frame length (10, 20 or 30 ms).
+VAD_FRAME_DURATION_MS = 30
 
 # Segmenting: how much audio to collect before sending to Whisper.
 MIN_SEGMENT_SECONDS = 0.5
 MAX_SEGMENT_SECONDS = 8.0
-MAX_SILENCE_BETWEEN_SPEECH_SECONDS = 0.8
+# Hiljaisuus ennen kuin lähetetään Whisperille: pienempi = nopeampi vastaus, isompi = vähemmän vähän puhetta leikataan.
+MAX_SILENCE_BETWEEN_SPEECH_SECONDS = 0.5
 
 # Interruption capture runs with shorter segments so the user can cut in.
 INTERRUPT_MIN_SEGMENT_SECONDS = 0.25
@@ -37,18 +40,17 @@ INTERRUPT_MAX_SILENCE_BETWEEN_SPEECH_SECONDS = 0.35
 # Set True to run noisereduce on each segment before Whisper (adds ~100 ms).
 USE_DENOISER = False
 
-# Whisper model size: "tiny" is fastest; "small" is more accurate for Finnish.
-WHISPER_MODEL = "base"
-# Initial prompt biases Whisper toward Finnish and English vocabulary.
-# Include wake words, commands, and common phrases to reduce mishearings.
+# Whisper model: "tiny" = nopein (suositus Pi/CPU), "base"/"small" = tarkempi suomeen.
+WHISPER_MODEL = "small"
+# Whisper: pitkä prompt auttaa tunnistamaan suomen ja komennot oikein (tiny-malli tarvitsee vihjeitä).
 WHISPER_PROMPT = (
-    "Founderbot, founderbott, founder bot, hei botti, hei robotti, founderbotti, "
-    "play, skip, pause, resume, stop, queue, music, song, soita, tauko, seuraava, lisää jonoon, "
-    "miten voit, voisitko, kerro, mitä, miksi, milloin, missä, mikä, kuka, "
-    "ruokalista, lounas, reaktori, newton, konehuone, hertsi, menu, lunch, "
-    "paljonko kello on, aika, time, joke, vitsi, tell me a joke, "
-    "what, how, why, when, where, yes, no, kyllä, ei, joo, ok, selvä, kiitos, ole hyvä, "
-    "hello, moi, terve, hei, moro, moikka, näkemiin, hei hei, goodbye, bye."
+    "Founderbot, founderbott, founder bot, found a bot, hei botti, hei robotti, founderbotti, hei bot. "
+    "Soita, soita musiikki, soita jotain, play, play music, skip, seuraava, seuraava kappale, tauko, pause, jatka, resume, lopeta, stop, lisää jonoon, queue. "
+    "Paljonko kello on, mitä kello on, kello, aika, time. Kerro vitsi, vitsi, joke. "
+    "Ruokalista, lounaslista, mitä ruokana, mitä lounaaksi, reaktori, newton, konehuone, hertsi, menu, lunch. "
+    "Moi, hei, moro, terve, moikka, päivää, kiitos, joo, ei, kyllä, ok, selvä, ole hyvä. "
+    "Miten voit, voisitko, kerro, mitä, miksi, milloin, missä, mikä, kuka, apua, mitä osaat. "
+    "Näkemiin, hei hei, moi moi, goodbye, bye."
 )
 
 
@@ -129,7 +131,7 @@ def transcribe(
         language="fi",
         initial_prompt=WHISPER_PROMPT,
         condition_on_previous_text=True,
-        no_speech_threshold=0.5,
+        no_speech_threshold=0.35,
     )
     text = "".join(seg.text for seg in segments).strip()
     print(f"[Timing] Whisper ({len(audio)/VAD_SAMPLE_RATE:.1f}s audio): {time.monotonic()-t0:.2f}s")
@@ -207,13 +209,7 @@ def listen_forever() -> None:
     ).start()
 
     identity_watcher = None
-    try:
-        from vision.live_identity import IdentityWatcher
-
-        identity_watcher = IdentityWatcher(engine.bind_person)
-        identity_watcher.start()
-    except Exception as exc:
-        print(f"[Vision] Live identity disabled: {exc}")
+    # Vision (kasvontunnistus) pois päältä — säästää CPU:ta.
 
     speech_frames: list[np.ndarray] = []
     segment_duration = 0.0
