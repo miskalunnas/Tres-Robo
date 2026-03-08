@@ -6,7 +6,7 @@
 - seuraava / skip
 - tauko / pause
 - jatka / resume
-- lopeta / stop
+- lopeta / stop / poista kaikki / clear (lopettaa soiton ja tyhjentää jonon)
 - ääni ylös / volume up
 - ääni alas / volume down
 

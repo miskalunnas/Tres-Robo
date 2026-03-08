@@ -27,8 +27,8 @@ else:
 # Rate expected by webrtcvad and Whisper. Capture may differ — we resample.
 VAD_SAMPLE_RATE = 16_000
 
-# VAD: 0 = herkimmin, 1 = tasapaino (selkeä puhe läpi, vähemmän taustamelua), 3 = vahvin.
-VAD_AGGRESSIVENESS = 1
+# VAD: 0 = herkimmin, 1 = tasapaino, 2 = vähemmän taustamelua puheena, 3 = vahvin.
+VAD_AGGRESSIVENESS = 2
 
 # VAD frame length (10, 20 or 30 ms).
 VAD_FRAME_DURATION_MS = 30
@@ -41,7 +41,7 @@ MAX_SEGMENT_SECONDS = 8.0
 MAX_SILENCE_BETWEEN_SPEECH_SECONDS = 0.9
 
 # Interruption capture: korkeampi kynnys = botti ei keskeydy taustamelusta tai lyhyistä äänistä.
-INTERRUPT_MIN_SEGMENT_SECONDS = 1.0
+INTERRUPT_MIN_SEGMENT_SECONDS = 1.2
 INTERRUPT_MAX_SEGMENT_SECONDS = 3.0
 INTERRUPT_MAX_SILENCE_BETWEEN_SPEECH_SECONDS = 0.5
 
@@ -56,7 +56,7 @@ WHISPER_MODEL = "small"
 # Whisper: keskeiset fraasit ja oikeat muodot auttavat tunnistusta (base/small). Herätyssanat tulee pitää täydellisinä.
 WHISPER_PROMPT = (
     "Founderbot, founderbott, founder bot, found a bot, founder bott, hei botti, hei bot, founderbotti, hei robotti. "
-    "Soita, soita musiikki, play, skip, seuraava, tauko, pause, jatka, resume, lopeta, stop, queue. "
+    "Soita, soita musiikki, play, skip, seuraava, tauko, pause, jatka, resume, lopeta, stop, queue, poista kaikki, clear. "
     "Volume, volume up, volume down, louder, quieter, kovempaa, hiljempaa, ääni ylös, ääni alas. "
     "Kello, mitä kello on, paljonko kello, aika, time. Vitsi, kerro vitsi, joke. "
     "Ruokalista, lounaslista, mitä ruokana, reaktori, newton, menu, lunch. "

@@ -53,6 +53,8 @@ STOP_KEYWORDS = (
     "stop playback", "turn off music", "turn off the music",
     "kill the music", "cut the music", "silence",
     "lopeta", "lopeta musiikki", "lopeta soitto", "musiikki pois",
+    "poista kaikki", "poista kaikki musiikki", "tyhjennä jono",
+    "clear", "clear all", "clear queue", "clear the queue",
     "stop",
 )
 VOLUME_UP_KEYWORDS = (

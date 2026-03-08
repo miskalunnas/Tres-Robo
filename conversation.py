@@ -453,8 +453,8 @@ class ConversationEngine:
             return False
 
         words = re.findall(r"\w+", normalized)
-        # Korkeampi kynnys: vähintään 5 sanaa ja 22 merkkiä, jotta botti ei keskeydy liian helposti.
-        if len(words) < 5 and len(normalized) < 22:
+        # Korkeampi kynnys: vähintään 6 sanaa JA 28 merkkiä, jotta botti ei keskeydy taustamelusta.
+        if len(words) < 6 or len(normalized) < 28:
             return False
 
         active_words = set(re.findall(r"\w+", self._active_reply_text.lower()))
@@ -471,7 +471,7 @@ class ConversationEngine:
         return self._text_looks_like_echo(text, self._active_reply_text)
 
     def _text_looks_like_echo(self, text: str, reference: str) -> bool:
-        """True if text is largely the same as reference (bot's own speech). Kynnys 0.45 = enemmän kaikuja hylätään."""
+        """True if text is largely the same as reference (bot's own speech). Kynnys 0.5 = vähemmän vääriä keskeytyksiä."""
         rem = text.lower().strip()
         ref = reference.lower()
         if not rem or not ref:
@@ -481,7 +481,7 @@ class ConversationEngine:
         if not words_rem:
             return False
         overlap = len(words_rem & words_ref) / len(words_rem)
-        if overlap >= 0.45:
+        if overlap >= 0.5:
             return True
         if len(rem) >= 8 and rem in ref:
             return True

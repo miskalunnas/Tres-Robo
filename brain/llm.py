@@ -68,7 +68,7 @@ LLM_TOOLS = [
         "type": "function",
         "function": {
             "name": "music_stop",
-            "description": "Stop playback and clear the queue. Use when the user wants to stop music from context.",
+            "description": "Stop all music and clear the queue. Use when the user wants to stop, remove, or clear all playing music (e.g. 'stop', 'poista kaikki', 'lopeta', 'clear', 'musiikki pois').",
             "parameters": {"type": "object", "properties": {}},
         },
     },
