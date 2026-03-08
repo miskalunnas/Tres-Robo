@@ -27,8 +27,8 @@ else:
 # Rate expected by webrtcvad and Whisper. Capture may differ — we resample.
 VAD_SAMPLE_RATE = 16_000
 
-# VAD: 0 = herkimmin, 1 = tasapaino, 2 = vähemmän taustamelua puheena, 3 = vahvin.
-VAD_AGGRESSIVENESS = 2
+# VAD: 0 = herkimmin (kauempaa puhuttu), 1 = tasapaino, 2 = vähemmän taustamelua, 3 = vahvin.
+VAD_AGGRESSIVENESS = 1
 
 # VAD frame length (10, 20 or 30 ms).
 VAD_FRAME_DURATION_MS = 30
@@ -37,7 +37,7 @@ VAD_FRAME_DURATION_MS = 30
 MIN_SEGMENT_SECONDS = 0.5
 MAX_SEGMENT_SECONDS = 8.0
 # OFFLINE: herätys sujuvampi — lyhyet "hei bot" pääsevät läpi.
-MIN_SEGMENT_WHEN_OFFLINE = 0.4
+MIN_SEGMENT_WHEN_OFFLINE = 0.35
 # ONLINE + musiikki: korkeampi kynnys = botti ei keskeytä musiikkia lyhyellä puheella.
 MIN_SEGMENT_WHEN_MUSIC_PLAYING = 1.2
 # Hiljaisuus ennen kuin lähetetään Whisperille: isompi = botti ei puhu päälle, pienempi = nopeampi vastaus.
@@ -52,8 +52,8 @@ INTERRUPT_MAX_SILENCE_BETWEEN_SPEECH_SECONDS = 0.5
 # Musiikin ducking: hiljaisuuden kesto (s) puheen jälkeen ennen volyymin palautusta.
 MUSIC_UNDUCK_SILENCE_SECONDS = 2.5
 
-# Set True to run noisereduce on each segment before Whisper (adds ~100 ms).
-USE_DENOISER = False
+# Kauempaa puhuttaessa taustamelu voi peittää puheen — denoiser auttaa.
+USE_DENOISER = True
 
 # Whisper model: "tiny" = nopein, "base" = nopea kompromissi, "small"/"medium" = tarkempi suomeen.
 WHISPER_MODEL = "small"
@@ -105,10 +105,15 @@ def _put_latest(q: queue.Queue, item) -> None:
                 return
 
 
+# Mikrofonivahvistus: kauempaa puhuttu puhe kuuluu paremmin (1.0 = ei vahvistusta).
+MIC_GAIN = 1.5
+
+
 def audio_callback(indata, frames, time_info, status) -> None:  # noqa: ARG001
     if status:
         print(f"[Audio status] {status}", file=sys.stderr)
-    _put_latest(audio_queue, indata.copy())
+    data = np.clip(indata.copy() * MIC_GAIN, -1.0, 1.0).astype(np.float32)
+    _put_latest(audio_queue, data)
 
 
 def resample(audio: np.ndarray, from_sr: int, to_sr: int) -> np.ndarray:
@@ -141,8 +146,8 @@ def _prepare_audio(frames: list[np.ndarray], native_sr: int) -> np.ndarray:
             print(f"[Denoiser error] {exc}", file=sys.stderr)
     peak = np.abs(audio).max()
     if peak > 1e-4:
-        # Kauempaa puhuttaessa ääni on hiljaisempi — vahvistus jopa 5x
-        audio = audio * min(0.95 / peak, 5.0)
+        # Kauempaa puhuttaessa ääni on hiljaisempi — vahvistus jopa 8x
+        audio = audio * min(0.95 / peak, 8.0)
     return audio
 
 
