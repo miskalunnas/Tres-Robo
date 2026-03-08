@@ -18,6 +18,13 @@ python vision/enroll.py --remove "Miro"
 import argparse
 import sys
 import time
+from pathlib import Path
+
+# Ensure project root is on sys.path so `vision.*` imports work regardless of
+# how/where this script is invoked.
+_ROOT = Path(__file__).resolve().parent.parent
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
 
 
 def _enroll_from_image(name: str, image_path: str) -> None:
