@@ -399,7 +399,11 @@ class ConversationEngine:
         if full_reply:
             print(f"[LLM] {full_reply}")
 
+        # Tools whose result must always be spoken aloud (they ARE the answer).
+        _ALWAYS_SPEAK = {"see", "lookup_knowledge", "get_menu"}
+
         tool_results: list[str] = []
+        always_speak_results: list[str] = []
         for tc in tool_calls_out:
             name = getattr(getattr(tc, "function", None), "name", None) or ""
             raw_args = getattr(getattr(tc, "function", None), "arguments", None) or "{}"
@@ -409,7 +413,10 @@ class ConversationEngine:
                 args = {}
             result = self._execute_llm_tool(name, args, language=language)
             if result:
-                tool_results.append(result)
+                if name in _ALWAYS_SPEAK:
+                    always_speak_results.append(result)
+                else:
+                    tool_results.append(result)
             if session_id:
                 self._store.log_tool_call(
                     tool_name=name,
@@ -419,7 +426,12 @@ class ConversationEngine:
                     session_id=session_id,
                 )
 
-        if not full_reply and tool_results:
+        # Always-speak tools: spoken regardless of whether LLM also produced text.
+        for result in always_speak_results:
+            self._speak_reply(result)
+
+        # Other tools: speak only if LLM said nothing (tool result acts as the reply).
+        if not full_reply and not always_speak_results and tool_results:
             reply = tool_results[0] if len(tool_results) == 1 else ". ".join(tool_results)
             self._speak_reply(reply)
 
@@ -652,6 +664,12 @@ class ConversationEngine:
             if not hits:
                 return "No matching info in knowledge base."
             return "\n\n".join(hits[:6])
+        if name == "see":
+            from vision.scene import capture_and_describe
+
+            question = (args.get("question") or "Kuvaile lyhyesti mitä näet.").strip()
+            print(f"[Vision] Capturing frame for question: {question}")
+            return capture_and_describe(question, self._brain._client)
         return ""
 
     def _log_user_message(self, text: str) -> None:

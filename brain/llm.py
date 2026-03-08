@@ -138,6 +138,27 @@ LLM_TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "see",
+            "description": (
+                "Capture a photo from the camera and analyze what is visible. "
+                "Use when the user asks what you see, who is in the room, "
+                "what something looks like, or any visual question."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "question": {
+                        "type": "string",
+                        "description": "The specific visual question to answer from the image, e.g. 'Kuka on huoneessa?' or 'What do you see?'",
+                    }
+                },
+                "required": ["question"],
+            },
+        },
+    },
 ]
 
 
