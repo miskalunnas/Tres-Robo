@@ -40,16 +40,16 @@ INTERRUPT_MAX_SILENCE_BETWEEN_SPEECH_SECONDS = 0.35
 # Set True to run noisereduce on each segment before Whisper (adds ~100 ms).
 USE_DENOISER = False
 
-# Whisper model: "tiny" = nopein (suositus Pi/CPU), "base"/"small" = tarkempi suomeen.
+# Whisper model: "tiny" = nopein, "base" = nopea kompromissi, "small"/"medium" = tarkempi suomeen.
 WHISPER_MODEL = "small"
-# Whisper: pitkä prompt auttaa tunnistamaan suomen ja komennot oikein (tiny-malli tarvitsee vihjeitä).
+# Whisper: keskeiset fraasit ja oikeat muodot auttavat tunnistusta (base/small).
 WHISPER_PROMPT = (
-    "Founderbot, founderbott, founder bot, found a bot, hei botti, hei robotti, founderbotti, hei bot. "
-    "Soita, soita musiikki, soita jotain, play, play music, skip, seuraava, seuraava kappale, tauko, pause, jatka, resume, lopeta, stop, lisää jonoon, queue. "
-    "Paljonko kello on, mitä kello on, kello, aika, time. Kerro vitsi, vitsi, joke. "
-    "Ruokalista, lounaslista, mitä ruokana, mitä lounaaksi, reaktori, newton, konehuone, hertsi, menu, lunch. "
-    "Moi, hei, moro, terve, moikka, päivää, kiitos, joo, ei, kyllä, ok, selvä, ole hyvä. "
-    "Miten voit, voisitko, kerro, mitä, miksi, milloin, missä, mikä, kuka, apua, mitä osaat. "
+    "Founderbot, hei botti, hei bot, hei robotti. "
+    "Soita, soita musiikki, play, skip, seuraava, tauko, pause, jatka, resume, lopeta, stop, queue. "
+    "Kello, mitä kello on, paljonko kello, aika, time. Vitsi, kerro vitsi, joke. "
+    "Ruokalista, lounaslista, mitä ruokana, reaktori, newton, menu, lunch. "
+    "Moi, hei, moro, terve, moikka, päivää, kiitos, joo, ei, kyllä, selvä. "
+    "Miten voit, pöhinä, pöhinää, voisitko, kerro, mitä, miksi, milloin, missä, mikä, kuka, apua, mitä osaat. "
     "Näkemiin, hei hei, moi moi, goodbye, bye."
 )
 

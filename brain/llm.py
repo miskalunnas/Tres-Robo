@@ -339,7 +339,7 @@ class Brain:
         if self._store is None:
             return
 
-        transcript = self._store.render_session_transcript(session_id, limit=40)
+        transcript = self._store.render_session_transcript(session_id, limit=28)
         if not transcript.strip():
             return
 
@@ -406,6 +406,7 @@ class Brain:
         session_id: str | None,
         person_id: str | None,
     ) -> list[dict]:
+        """Rakenna viestilista: system prompt + edellinen yhteenveto + 5 faktaa + (ehkä) 4 tietopohja-osumaa + 8 viimeisintä viestiä."""
         if self._store is None or not session_id:
             self._history.append({"role": "user", "content": user_text})
             return self._history
@@ -421,7 +422,7 @@ class Brain:
                     "content": f"Edellinen istunto (yhteenveto): {prev_summary}",
                 }
             )
-        memory_context = self._store.render_memory_context(person_id, limit=8)
+        memory_context = self._store.render_memory_context(person_id, limit=5)
         if memory_context:
             messages.append(
                 {
@@ -450,7 +451,7 @@ class Brain:
             else []
         )
         if knowledge_hits:
-            trimmed = [c[:400].rstrip() + ("..." if len(c) > 400 else "") for c in knowledge_hits]
+            trimmed = [c[:260].rstrip() + ("..." if len(c) > 260 else "") for c in knowledge_hits]
             messages.append(
                 {
                     "role": "system",
@@ -460,7 +461,7 @@ class Brain:
                     ),
                 }
             )
-        messages.extend(self._store.get_session_messages(session_id, limit=12))
+        messages.extend(self._store.get_session_messages(session_id, limit=8))
         return messages
 
     def _reset_history(self) -> None:

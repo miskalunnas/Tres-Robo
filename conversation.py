@@ -55,6 +55,7 @@ class ConversationEngine:
         self._reply_cancel_event: threading.Event | None = None
         self._reply_generation = 0
         self._active_reply_text = ""
+        self._last_spoken_text = ""
 
     # ------------------------------------------------------------------
     def handle(self, text: str, now: float) -> None:
@@ -97,10 +98,6 @@ class ConversationEngine:
             ):
                 return False
 
-            print(f"[Interrupt heard] {text}")
-            self._cancel_active_reply_locked()
-            interrupt_speech()
-
             if matched_wake_word:
                 remainder = self._strip_phrase(text, matched_wake_word)
             elif matched_interrupt:
@@ -108,7 +105,17 @@ class ConversationEngine:
             else:
                 remainder = text.strip()
 
+            is_echo = bool(remainder and self._looks_like_echo(remainder))
+
+            print(f"[Interrupt heard] {text}")
+            self._cancel_active_reply_locked()
+            interrupt_speech()
+
             if not remainder:
+                self._last_activity = now
+                return True
+
+            if is_echo:
                 self._last_activity = now
                 return True
 
@@ -166,6 +173,9 @@ class ConversationEngine:
 
     def _process_online_text(self, text: str, *, now: float) -> None:
         self._last_activity = now
+        if self._last_spoken_text and self._text_looks_like_echo(text, self._last_spoken_text):
+            self._last_spoken_text = ""
+            return
         print(f"[Online heard] {text}")
         print(f"You said: {text}")
         self._log_user_message(text)
@@ -410,10 +420,31 @@ class ConversationEngine:
         if active_words:
             current_words = set(words)
             overlap = len(current_words & active_words) / max(1, len(current_words))
-            if overlap >= 0.8:
+            if overlap >= 0.5:
                 return False
 
         return True
+
+    def _looks_like_echo(self, text: str) -> bool:
+        """True if text is likely the bot's own TTS picked up by the mic (ei käsitellä)."""
+        return self._text_looks_like_echo(text, self._active_reply_text)
+
+    def _text_looks_like_echo(self, text: str, reference: str) -> bool:
+        """True if text is largely the same as reference (bot's own speech)."""
+        rem = text.lower().strip()
+        ref = reference.lower()
+        if not rem or not ref:
+            return False
+        words_rem = set(re.findall(r"\w+", rem))
+        words_ref = set(re.findall(r"\w+", ref))
+        if not words_rem:
+            return False
+        overlap = len(words_rem & words_ref) / len(words_rem)
+        if overlap >= 0.5:
+            return True
+        if len(rem) >= 8 and rem in ref:
+            return True
+        return False
 
     def _execute_llm_tool(self, name: str, args: dict) -> str:
         """Execute a tool invoked by the LLM. Returns a short phrase for TTS."""
@@ -460,3 +491,4 @@ class ConversationEngine:
     def _log_assistant_message(self, text: str) -> None:
         if self._session_id and text:
             self._store.add_message(self._session_id, "assistant", text)
+        self._last_spoken_text = text or self._last_spoken_text
