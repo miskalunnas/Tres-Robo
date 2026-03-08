@@ -7,7 +7,6 @@ from dataclasses import dataclass
 import numpy as np
 import sounddevice as sd
 import webrtcvad
-from faster_whisper import WhisperModel
 
 try:
     import noisereduce as nr
@@ -17,17 +16,26 @@ except Exception:  # noqa: BLE001
 from conversation import ConversationEngine
 from voice.tts import is_busy
 
+# Puheen tunnistus: True = OpenAI Whisper API (pilvi), False = paikallinen faster-whisper.
+USE_CLOUD_STT = True
+
+if USE_CLOUD_STT:
+    from voice import stt_openai
+else:
+    from faster_whisper import WhisperModel
+
 # Rate expected by webrtcvad and Whisper. Capture may differ — we resample.
 VAD_SAMPLE_RATE = 16_000
 
-# VAD: 0 = herkimmin, 3 = vahvin (vaatii selkeämmän puheen). 1–2 vähentää taustamelun tunnistusta.
+# VAD: 0 = herkimmin, 1 = tasapaino (selkeä puhe läpi, vähemmän taustamelua), 3 = vahvin.
 VAD_AGGRESSIVENESS = 1
 
 # VAD frame length (10, 20 or 30 ms).
 VAD_FRAME_DURATION_MS = 30
 
 # Segmenting: how much audio to collect before sending to Whisper.
-MIN_SEGMENT_SECONDS = 0.5
+# Pienempi MIN = lyhyet herätyssanat ("hei bot", "founderbot") pääsevät Whisperiin.
+MIN_SEGMENT_SECONDS = 0.3
 MAX_SEGMENT_SECONDS = 8.0
 # Hiljaisuus ennen kuin lähetetään Whisperille: pienempi = nopeampi vastaus, isompi = vähemmän vähän puhetta leikataan.
 MAX_SILENCE_BETWEEN_SPEECH_SECONDS = 0.5
@@ -42,9 +50,9 @@ USE_DENOISER = False
 
 # Whisper model: "tiny" = nopein, "base" = nopea kompromissi, "small"/"medium" = tarkempi suomeen.
 WHISPER_MODEL = "small"
-# Whisper: keskeiset fraasit ja oikeat muodot auttavat tunnistusta (base/small).
+# Whisper: keskeiset fraasit ja oikeat muodot auttavat tunnistusta (base/small). Herätyssanat tulee pitää täydellisinä.
 WHISPER_PROMPT = (
-    "Founderbot, hei botti, hei bot, hei robotti. "
+    "Founderbot, founderbott, founder bot, found a bot, founder bott, hei botti, hei bot, founderbotti, hei robotti. "
     "Soita, soita musiikki, play, skip, seuraava, tauko, pause, jatka, resume, lopeta, stop, queue. "
     "Kello, mitä kello on, paljonko kello, aika, time. Vitsi, kerro vitsi, joke. "
     "Ruokalista, lounaslista, mitä ruokana, reaktori, newton, menu, lunch. "
@@ -109,12 +117,8 @@ def float_to_int16_bytes(chunk: np.ndarray) -> bytes:
     return np.clip(chunk * 32767.0, -32768, 32767).astype(np.int16).tobytes()
 
 
-def transcribe(
-    model: WhisperModel,
-    frames: list[np.ndarray],
-    native_sr: int,
-) -> str:
-    """Concatenate frames, resample to 16 kHz, optionally denoise, then Whisper."""
+def _prepare_audio(frames: list[np.ndarray], native_sr: int) -> np.ndarray:
+    """Concatenate frames, resample to 16 kHz, optionally denoise, normalize. Returns mono float32."""
     audio = np.concatenate(frames, axis=0)
     if audio.ndim > 1:
         audio = audio[:, 0]
@@ -124,6 +128,14 @@ def transcribe(
             audio = nr.reduce_noise(y=audio, sr=VAD_SAMPLE_RATE)
         except Exception as exc:  # noqa: BLE001
             print(f"[Denoiser error] {exc}", file=sys.stderr)
+    peak = np.abs(audio).max()
+    if peak > 1e-4:
+        audio = audio * min(0.95 / peak, 3.0)
+    return audio
+
+
+def _transcribe_local(model, audio: np.ndarray) -> str:
+    """Paikallinen faster-whisper (käytetään vain kun USE_CLOUD_STT=False)."""
     t0 = time.monotonic()
     segments, info = model.transcribe(
         audio,
@@ -132,15 +144,46 @@ def transcribe(
         initial_prompt=WHISPER_PROMPT,
         condition_on_previous_text=True,
         no_speech_threshold=0.35,
+        temperature=(0.0, 0.2, 0.4),
     )
     text = "".join(seg.text for seg in segments).strip()
-    print(f"[Timing] Whisper ({len(audio)/VAD_SAMPLE_RATE:.1f}s audio): {time.monotonic()-t0:.2f}s")
+    print(f"[Timing] Whisper local ({len(audio)/VAD_SAMPLE_RATE:.1f}s): {time.monotonic()-t0:.2f}s")
     if text:
         print(f"[Whisper/{info.language}] {text}")
     return text
 
 
-def _transcription_worker(model: WhisperModel, native_sr: int) -> None:
+def _transcribe_cloud(audio: np.ndarray) -> str:
+    """OpenAI Whisper API (pilvi)."""
+    t0 = time.monotonic()
+    text = stt_openai.transcribe(
+        audio,
+        VAD_SAMPLE_RATE,
+        language="fi",
+        prompt=WHISPER_PROMPT,
+    )
+    print(f"[Timing] Whisper cloud ({len(audio)/VAD_SAMPLE_RATE:.1f}s): {time.monotonic()-t0:.2f}s")
+    if text:
+        print(f"[Whisper/fi] {text}")
+    return text
+
+
+def transcribe(
+    model,
+    frames: list[np.ndarray],
+    native_sr: int,
+) -> str:
+    """Prepare audio, optionally skip very quiet segments, then run local or cloud STT."""
+    audio = _prepare_audio(frames, native_sr)
+    # Ohita pilvikutsu jos segmentti on liian hiljainen (taustamelu, säästää API-kutsuja).
+    if np.abs(audio).max() < 0.08:
+        return ""
+    if USE_CLOUD_STT:
+        return _transcribe_cloud(audio)
+    return _transcribe_local(model, audio)
+
+
+def _transcription_worker(model, native_sr: int) -> None:
     while True:
         task = segment_queue.get()
         try:
@@ -176,10 +219,14 @@ def listen_forever() -> None:
     # even when arecord confirms they work. Using the ALSA hw string bypasses this.
     MIC_DEVICE = "hw:2,0"
     native_sr = 48_000  # confirmed via sd.query_devices()
-    print(f"[Mic] {MIC_DEVICE} — native {native_sr} Hz, VAD/Whisper at {VAD_SAMPLE_RATE} Hz")
+    print(f"[Mic] {MIC_DEVICE} — native {native_sr} Hz, VAD/STT at {VAD_SAMPLE_RATE} Hz")
 
-    print(f"Loading Whisper model '{WHISPER_MODEL}'... (first run may take a moment)")
-    model = WhisperModel(WHISPER_MODEL, device="cpu", compute_type="int8")
+    if USE_CLOUD_STT:
+        print("[STT] Using OpenAI Whisper (cloud). Set OPENAI_API_KEY in .env")
+        model = None
+    else:
+        print(f"Loading Whisper model '{WHISPER_MODEL}'... (first run may take a moment)")
+        model = WhisperModel(WHISPER_MODEL, device="cpu", compute_type="int8")
 
     vad = webrtcvad.Vad(VAD_AGGRESSIVENESS)
 
