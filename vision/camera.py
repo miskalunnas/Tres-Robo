@@ -45,8 +45,8 @@ class Camera:
             from picamera2 import Picamera2  # type: ignore[import]
 
             cam = Picamera2()
-            config = cam.create_preview_configuration(
-                main={"size": (640, 480), "format": "RGB888"}
+            config = cam.create_video_configuration(
+                main={"size": (640, 480)}
             )
             cam.configure(config)
             cam.start()
@@ -86,8 +86,16 @@ class Camera:
     def _capture_picamera2(self) -> np.ndarray:
         import cv2  # type: ignore[import]
 
-        frame_rgb = self._cam.capture_array()
-        return cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
+        frame = self._cam.capture_array()
+        # video_configuration returns XRGB or BGR depending on Pi OS version.
+        # Normalise to BGR (3-channel) for OpenCV/JPEG encoding.
+        if frame.ndim == 3 and frame.shape[2] == 4:
+            # XRGB → BGR
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
+        elif frame.ndim == 3 and frame.shape[2] == 3:
+            # Assume RGB from libcamera → BGR for OpenCV
+            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+        return frame
 
     def _capture_opencv(self) -> np.ndarray:
         ret, frame = self._cap.read()
