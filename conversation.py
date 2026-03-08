@@ -21,6 +21,7 @@ WAKE_WORDS = [
     "founderbot",
     "founderbott",
     "founder bot",
+    "founder, bot",
     "found a bot",
     "founder bott",
     "founderbotti",
@@ -34,11 +35,13 @@ WAKE_WORDS = [
     "kuule bot",
     "bot kuule",
     "botti kuule",
-    # Tervehdys + bot
+    # Tervehdys + bot (myös pilkulla: "moro, founder, bot")
     "terve botti",
     "terve bot",
     "moro botti",
     "moro bot",
+    "moro, bot",
+    "moro, founder",
     "moi botti",
     "moi bot",
     # Lyhyet (kauempaa puhuttaessa)
@@ -46,6 +49,14 @@ WAKE_WORDS = [
     "okay bot",
     "yo bot",
 ]
+
+
+def _normalize_for_wake(text: str) -> str:
+    """Normalize text for wake word matching: lowercase, punctuation -> space, collapse spaces."""
+    s = text.lower().strip()
+    s = re.sub(r"[,.!?:;]+", " ", s)
+    s = re.sub(r"\s+", " ", s)
+    return s.strip()
 SESSION_END_PATTERNS = (
     re.compile(r"\b(?:goodbye|bye(?: bye)?|näkemiin|hei hei|moi moi)\b"),
     re.compile(
@@ -124,7 +135,10 @@ class ConversationEngine:
                 self._end_session("timeout")
 
             normalized = text.lower()
-            matched_wake_word = next((word for word in WAKE_WORDS if word in normalized), None)
+            normalized_flex = _normalize_for_wake(text)
+            matched_wake_word = next(
+                (w for w in WAKE_WORDS if w in normalized or w in normalized_flex), None
+            )
 
             if not self._online:
                 print(f"[Offline heard] {text}")
@@ -146,7 +160,10 @@ class ConversationEngine:
         Päätetään reagoidaanko: vain selkeä keskeytys (wake word, stop, pitkä tarkoituksellinen lause)."""
         with self._lock:
             normalized = text.lower()
-            matched_wake_word = next((word for word in WAKE_WORDS if word in normalized), None)
+            normalized_flex = _normalize_for_wake(text)
+            matched_wake_word = next(
+                (w for w in WAKE_WORDS if w in normalized or w in normalized_flex), None
+            )
             matched_interrupt = next((word for word in INTERRUPT_WORDS if word in normalized), None)
             matched_session_end = self._is_session_end_intent(text)
             local_command = parse_command(text)
