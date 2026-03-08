@@ -30,11 +30,27 @@ def capture_and_describe(question: str, client) -> str:
     cv2.imwrite("/tmp/vision_debug.jpg", frame)
     print(f"[Vision] Debug frame saved to /tmp/vision_debug.jpg (shape={frame.shape})")
 
+    # Face recognition — runs in-memory, fast, gracefully skipped if not installed.
+    identity_hint = ""
+    try:
+        from vision.identity_manager import FaceManager
+        names = FaceManager.get().recognize_faces(frame)
+        if names:
+            identity_hint = "Tunnistetut henkilöt kuvassa: " + ", ".join(names) + ". "
+            print(f"[Vision] Recognized: {names}")
+        else:
+            print("[Vision] No known faces recognized.")
+    except Exception as exc:
+        print(f"[Vision] Face recognition skipped: {exc}", file=sys.stderr)
+
     # Encode as JPEG. detail="low" in the API caps at 512 px anyway, so quality 75 is fine.
     ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 75])
     if not ok or buf is None:
         return "Kuvan koodaus epäonnistui."
     b64 = base64.b64encode(buf.tobytes()).decode()
+
+    # Prepend any identity context to the question so the Vision model can use it.
+    prompt = identity_hint + question
 
     try:
         resp = client.chat.completions.create(
@@ -50,7 +66,7 @@ def capture_and_describe(question: str, client) -> str:
                                 "detail": "low",  # ~85 image tokens, fastest + cheapest
                             },
                         },
-                        {"type": "text", "text": question},
+                        {"type": "text", "text": prompt},
                     ],
                 }
             ],
