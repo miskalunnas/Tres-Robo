@@ -69,6 +69,14 @@ You should see something like:
   - When you say "Hei botti", the robot goes ONLINE.
   - In ONLINE mode, segments are printed as: `You said: ...`
 
+### Music playback (Tools/music)
+
+- **Play, queue, skip, pause, resume, stop** are handled by the music tool (e.g. “play Beatles”, “next song”, “pause”).
+- Playback uses **yt-dlp** (pip) to resolve queries to audio URLs and **ffplay** (ffmpeg) or **mpv** to play them. Install at least one:
+  - **ffmpeg**: `sudo apt install ffmpeg` (provides `ffplay`)
+  - **mpv**: `sudo apt install mpv`
+- `requirements.txt` already includes `yt-dlp`. The bot will say “I couldn’t start playback.” if no player is found or the search fails.
+
 ### Noise handling
 
 - The microphone stream is filtered by **WebRTC VAD** (`webrtcvad`), which tries to keep only speech and drop pure noise.

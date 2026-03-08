@@ -151,13 +151,11 @@ class _TTSPlayer:
         interrupted = False
         try:
             t0 = time.monotonic()
-            audio = client.text_to_speech.convert(
-                voice_id=_VOICE_ID,
-                text=text,
-                model_id="eleven_turbo_v2_5",
-                output_format="mp3_44100_128",
-            )
-            # Stream MP3 to mpg123 via PulseAudio output (required for Bluetooth).
+            # Use streaming API so we get first audio bytes earlier (lower latency).
+            audio_stream = _get_audio_stream(client, text)
+            if audio_stream is None:
+                return False
+            # Start mpg123 and feed chunks as they arrive.
             proc = subprocess.Popen(
                 ["mpg123", "-o", "pulse", "-q", "-"],
                 stdin=subprocess.PIPE,
@@ -165,14 +163,23 @@ class _TTSPlayer:
             with self._lock:
                 self._current_proc = proc
             first_chunk = True
-            for chunk in audio:
+            for chunk in audio_stream:
+                if self._was_interrupted():
+                    interrupted = True
+                    break
                 if first_chunk:
                     print(f"[Timing] TTS first-chunk: {time.monotonic()-t0:.2f}s")
                     first_chunk = False
                 if proc.stdin is None:
                     break
+                if isinstance(chunk, bytes):
+                    data = chunk
+                else:
+                    data = bytes(chunk) if not isinstance(chunk, str) else chunk.encode()
+                if not data:
+                    continue
                 try:
-                    proc.stdin.write(chunk)
+                    proc.stdin.write(data)
                 except (BrokenPipeError, OSError):
                     interrupted = True
                     break
@@ -207,6 +214,44 @@ def _get_client():
         except ImportError:
             print("[TTS] elevenlabs package not installed. Run: pip install elevenlabs", file=sys.stderr)
     return _client
+
+
+def _get_audio_stream(client, text: str):
+    """Return an iterator of audio bytes (streaming preferred for lower first-byte latency)."""
+    kwargs = {
+        "voice_id": _VOICE_ID,
+        "text": text,
+        "model_id": "eleven_turbo_v2_5",
+        "output_format": "mp3_44100_128",
+    }
+    # Prefer streaming API: server sends chunks as generated so we get first bytes earlier.
+    stream_method = getattr(
+        getattr(client, "text_to_speech", None),
+        "convert_as_stream",
+        None,
+    ) or getattr(
+        getattr(client, "text_to_speech", None),
+        "stream",
+        None,
+    )
+    if stream_method is not None:
+        try:
+            stream = stream_method(**kwargs)
+            if stream is not None:
+                return stream
+        except (TypeError, Exception):
+            pass
+    # Fallback: non-streaming convert (may return iterator of chunks or single bytes).
+    try:
+        result = client.text_to_speech.convert(**kwargs)
+        if result is None:
+            return None
+        # If it's bytes-like, treat as single chunk; otherwise assume it's an iterator.
+        if isinstance(result, (bytes, bytearray)):
+            return iter([bytes(result)])
+        return result
+    except Exception:
+        return None
 
 
 _player = _TTSPlayer()

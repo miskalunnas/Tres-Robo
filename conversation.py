@@ -5,6 +5,7 @@ State machine:
   ONLINE:  passes every utterance to the LLM and speaks the reply.
            Returns to OFFLINE on inactivity timeout or a goodbye phrase.
 """
+import json
 import re
 import threading
 import time
@@ -190,8 +191,8 @@ class ConversationEngine:
                 self._speak_reply(tool_result.response)
             return
 
-        print("[Brain] Thinking...")
-        self._start_streamed_reply(
+        # No keyword match: LLM with tools (streaming so TTS can start early).
+        self._start_streamed_reply_with_tools(
             text=text,
             session_id=self._session_id,
             person_id=self._person_id,
@@ -233,6 +234,81 @@ class ConversationEngine:
             args=(text, session_id, person_id, generation, cancel_event),
             daemon=True,
         ).start()
+
+    def _start_streamed_reply_with_tools(
+        self,
+        *,
+        text: str,
+        session_id: str | None,
+        person_id: str | None,
+    ) -> None:
+        """Stream LLM reply with tools; execute tool_calls after stream ends."""
+        cancel_event = threading.Event()
+        with self._lock:
+            self._cancel_active_reply_locked()
+            self._reply_generation += 1
+            generation = self._reply_generation
+            self._reply_cancel_event = cancel_event
+            self._active_reply_text = ""
+        threading.Thread(
+            target=self._run_streamed_reply_with_tools,
+            args=(text, session_id, person_id, generation, cancel_event),
+            daemon=True,
+        ).start()
+
+    def _run_streamed_reply_with_tools(
+        self,
+        text: str,
+        session_id: str | None,
+        person_id: str | None,
+        generation: int,
+        cancel_event: threading.Event,
+    ) -> None:
+        tool_calls_out: list = []
+        chunks = self._brain.stream_think_with_tools(
+            text,
+            session_id=session_id,
+            person_id=person_id,
+            stop_event=cancel_event,
+            tool_calls_out=tool_calls_out,
+        )
+        full_reply = self._speak_streamed_reply(
+            chunks,
+            generation=generation,
+            cancel_event=cancel_event,
+        )
+        if full_reply:
+            print(f"[LLM] {full_reply}")
+
+        tool_results: list[str] = []
+        for tc in tool_calls_out:
+            name = getattr(getattr(tc, "function", None), "name", None) or ""
+            raw_args = getattr(getattr(tc, "function", None), "arguments", None) or "{}"
+            try:
+                args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+            except json.JSONDecodeError:
+                args = {}
+            result = self._execute_llm_tool(name, args)
+            if result:
+                tool_results.append(result)
+            if session_id:
+                self._store.log_tool_call(
+                    tool_name=name,
+                    input_payload={"text": text, "arguments": args},
+                    output_summary=result or "",
+                    success=bool(result and "couldn't" not in result.lower()),
+                    session_id=session_id,
+                )
+
+        if not full_reply and tool_results:
+            reply = tool_results[0] if len(tool_results) == 1 else ". ".join(tool_results)
+            self._speak_reply(reply)
+
+        with self._lock:
+            if self._reply_cancel_event is cancel_event:
+                self._reply_cancel_event = None
+            if generation == self._reply_generation and cancel_event.is_set():
+                self._active_reply_text = ""
 
     def _run_streamed_reply(
         self,
@@ -339,6 +415,44 @@ class ConversationEngine:
                 return False
 
         return True
+
+    def _execute_llm_tool(self, name: str, args: dict) -> str:
+        """Execute a tool invoked by the LLM. Returns a short phrase for TTS."""
+        if name == "play_music":
+            from Tools.music import play_async
+
+            query = (args.get("query") or "music").strip() or "music"
+            play_async(query)
+            return f"Playing {query}."
+        if name == "music_skip":
+            from Tools.music import skip
+
+            ok = skip()
+            return "Skipping to next song." if ok else "Nothing playing to skip."
+        if name == "music_pause":
+            from Tools.music import pause
+
+            ok = pause()
+            return "Music paused." if ok else "Nothing to pause."
+        if name == "music_resume":
+            from Tools.music import resume
+
+            ok = resume()
+            return "Resuming playback." if ok else "Nothing to resume."
+        if name == "music_stop":
+            from Tools.music import stop
+
+            ok = stop()
+            return "Playback stopped." if ok else "Nothing was playing."
+        if name == "music_add_to_queue":
+            from Tools.music import add_to_queue
+
+            query = (args.get("query") or "").strip()
+            if query:
+                add_to_queue(query)
+                return f"Added {query} to the queue."
+            return "What should I add to the queue?"
+        return ""
 
     def _log_user_message(self, text: str) -> None:
         if self._session_id:

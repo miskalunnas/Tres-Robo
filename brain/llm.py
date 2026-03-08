@@ -6,6 +6,7 @@ import re
 import time
 from collections.abc import Iterator
 import threading
+from types import SimpleNamespace
 
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -19,6 +20,76 @@ MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 _PROMPT_FILE = os.path.join(os.path.dirname(__file__), "system_prompt.txt")
 with open(_PROMPT_FILE, encoding="utf-8") as _f:
     SYSTEM_PROMPT = _f.read().strip()
+
+# Tools the LLM can call when it infers intent from conversation (e.g. play music).
+LLM_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "play_music",
+            "description": "Start playing music. Use when the user wants to hear music from context (e.g. background, chill, jazz) without saying an explicit command like 'play jazz'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Search query for the music, e.g. 'chill', 'jazz', 'background music', 'lo-fi'.",
+                    }
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "music_skip",
+            "description": "Skip to the next track. Use when the user wants to skip or change the song from context.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "music_pause",
+            "description": "Pause playback. Use when the user wants to pause music from context.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "music_resume",
+            "description": "Resume playback. Use when the user wants to continue music from context.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "music_stop",
+            "description": "Stop playback and clear the queue. Use when the user wants to stop music from context.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "music_add_to_queue",
+            "description": "Add a song or search query to the playback queue. Use when the user wants to queue something to play next.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Search query or song name to add to the queue.",
+                    }
+                },
+                "required": ["query"],
+            },
+        },
+    },
+]
 
 
 class Brain:
@@ -58,6 +129,146 @@ class Brain:
         if not session_id:
             self._history.append({"role": "assistant", "content": reply})
         return reply
+
+    def think_with_tools(
+        self,
+        user_text: str,
+        *,
+        session_id: str | None = None,
+        person_id: str | None = None,
+    ) -> tuple[str, list]:
+        """Call the LLM with tool definitions. Returns (content, tool_calls).
+        tool_calls is a list of OpenAI tool_call objects (with .id, .function.name, .function.arguments).
+        """
+        messages = self._build_messages(user_text, session_id=session_id, person_id=person_id)
+        print(f"[Brain] API call with tools (model={MODEL}, history_len={len(messages)})...")
+
+        t0 = time.monotonic()
+        try:
+            response = self._client.chat.completions.create(
+                model=MODEL,
+                messages=messages,
+                tools=LLM_TOOLS,
+                tool_choice="auto",
+                timeout=30,
+            )
+        except Exception as exc:
+            print(f"[Brain] API error: {exc}")
+            return "Sorry, I couldn't reach my brain right now.", []
+
+        print(f"[Timing] LLM with tools: {time.monotonic()-t0:.2f}s")
+        msg = response.choices[0].message
+        content = (msg.content or "").strip()
+        tool_calls = getattr(msg, "tool_calls", None) or []
+
+        if not session_id:
+            self._history.append(
+                {"role": "assistant", "content": content or "I used a tool."}
+            )
+
+        return content, list(tool_calls)
+
+    def stream_think_with_tools(
+        self,
+        user_text: str,
+        *,
+        session_id: str | None = None,
+        person_id: str | None = None,
+        stop_event: threading.Event | None = None,
+        tool_calls_out: list | None = None,
+    ) -> Iterator[str]:
+        """Stream a reply with tools enabled. Yields speakable content chunks.
+        When the stream ends, appends parsed tool_calls to tool_calls_out (each item
+        has .id, .function.name, .function.arguments for compatibility with OpenAI response).
+        """
+        if tool_calls_out is None:
+            tool_calls_out = []
+        messages = self._build_messages(user_text, session_id=session_id, person_id=person_id)
+        print(f"[Brain] Streaming API call with tools (model={MODEL}, history_len={len(messages)})...")
+
+        t0 = time.monotonic()
+        try:
+            stream = self._client.chat.completions.create(
+                model=MODEL,
+                messages=messages,
+                tools=LLM_TOOLS,
+                tool_choice="auto",
+                timeout=30,
+                stream=True,
+            )
+        except Exception as exc:
+            print(f"[Brain] Streaming API error: {exc}")
+            yield "Sorry, I couldn't reach my brain right now."
+            return
+
+        buffer = ""
+        emitted_parts: list[str] = []
+        tool_calls_acc: dict[int, dict[str, str]] = {}
+        try:
+            for event in stream:
+                if stop_event is not None and stop_event.is_set():
+                    print("[Brain] Streaming cancelled.")
+                    return
+                if not event.choices:
+                    continue
+                delta = event.choices[0].delta
+
+                if getattr(delta, "content", None):
+                    buffer += delta.content
+                    chunks, buffer = self._extract_speakable_chunks(buffer)
+                    for chunk in chunks:
+                        if stop_event is not None and stop_event.is_set():
+                            return
+                        emitted_parts.append(chunk)
+                        yield chunk
+
+                for tc in getattr(delta, "tool_calls", None) or []:
+                    idx = getattr(tc, "index", tc.get("index") if isinstance(tc, dict) else 0)
+                    if idx not in tool_calls_acc:
+                        tool_calls_acc[idx] = {"id": "", "name": "", "arguments": ""}
+                    acc = tool_calls_acc[idx]
+                    fn = getattr(tc, "function", None) or (tc.get("function") if isinstance(tc, dict) else {})
+                    if isinstance(fn, dict):
+                        acc["id"] += tc.get("id") or ""
+                        acc["name"] += fn.get("name") or ""
+                        acc["arguments"] += fn.get("arguments") or ""
+                    else:
+                        acc["id"] += getattr(tc, "id", None) or ""
+                        acc["name"] += getattr(fn, "name", None) or ""
+                        acc["arguments"] += getattr(fn, "arguments", None) or ""
+
+        except Exception as exc:
+            print(f"[Brain] Streaming interrupted: {exc}")
+            if not emitted_parts:
+                yield "Sorry, I lost my train of thought."
+        finally:
+            print(f"[Timing] LLM stream with tools: {time.monotonic()-t0:.2f}s")
+
+        if stop_event is not None and stop_event.is_set():
+            return
+        tail = buffer.strip()
+        if tail:
+            emitted_parts.append(tail)
+            yield tail
+
+        # Build tool_calls list for the caller (same shape as OpenAI non-stream response).
+        for idx in sorted(tool_calls_acc.keys()):
+            acc = tool_calls_acc[idx]
+            if acc["name"]:
+                tool_calls_out.append(
+                    SimpleNamespace(
+                        id=acc["id"],
+                        function=SimpleNamespace(
+                            name=acc["name"],
+                            arguments=acc["arguments"] or "{}",
+                        ),
+                    )
+                )
+
+        if not session_id and (emitted_parts or tool_calls_out):
+            self._history.append(
+                {"role": "assistant", "content": " ".join(emitted_parts).strip() if emitted_parts else "I used a tool."}
+            )
 
     def stream_think(
         self,

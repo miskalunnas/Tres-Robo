@@ -6,6 +6,10 @@ env/
 # Environment variables
 .env
 
+# YouTube Premium cookies (do not commit)
+cookies.txt
+config/cookies.txt
+
 # Vosk models (large binary files)
 models/
 

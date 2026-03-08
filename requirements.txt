@@ -1,10 +1,9 @@
+# Optional (may need C++ Build Tools / CMake on Windows): webrtcvad (VAD), face_recognition (vision)
 sounddevice
 numpy
 faster-whisper
-webrtcvad
 noisereduce
 opencv-python
-face_recognition
 yt-dlp
 python-dotenv
 openai

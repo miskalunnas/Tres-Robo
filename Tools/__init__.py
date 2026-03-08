@@ -30,31 +30,38 @@ def handle_speech(text: str) -> ToolExecutionResult:
     success = True
 
     if action == "music_play":
-        from .music import play
+        from .music import play_async
 
-        success = play(cmd.get("query", ""))
-        if not success:
-            response = "I couldn't start playback."
+        query = (cmd.get("query") or "music").strip() or "music"
+        play_async(query)
+        response = cmd.get("response") or f"Playing {query}."
     elif action == "music_queue":
         from .music import add_to_queue
 
         add_to_queue(cmd.get("query", ""))
+        response = cmd.get("response") or "Added to queue."
     elif action == "music_skip":
         from .music import skip
 
-        skip()
+        ok = skip()
+        response = cmd.get("response") if ok else "Nothing playing to skip."
+        if ok and not response:
+            response = "Skipping to next song."
     elif action == "music_pause":
         from .music import pause
 
-        pause()
+        ok = pause()
+        response = "Music paused." if ok else "Nothing to pause."
     elif action == "music_resume":
         from .music import resume
 
-        resume()
+        ok = resume()
+        response = "Resuming playback." if ok else "Nothing to resume."
     elif action == "music_stop":
         from .music import stop
 
-        stop()
+        ok = stop()
+        response = "Playback stopped." if ok else "Nothing was playing."
     elif action == "menu_check":
         from .menu import get_all_menus, get_menu
 

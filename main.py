@@ -22,7 +22,7 @@ VAD_SAMPLE_RATE = 16_000
 
 # Voice activity detection settings.
 VAD_FRAME_DURATION_MS = 30   # 10, 20 or 30 ms are valid
-VAD_AGGRESSIVENESS = 2        # 0–3; higher = stricter noise rejection
+VAD_AGGRESSIVENESS = 1        # 0–3; lower = more sensitive (less cutting off speech)
 
 # Segmenting: how much audio to collect before sending to Whisper.
 MIN_SEGMENT_SECONDS = 0.5
@@ -40,9 +40,15 @@ USE_DENOISER = False
 # Whisper model size: "tiny" is fastest; "small" is more accurate for Finnish.
 WHISPER_MODEL = "base"
 # Initial prompt biases Whisper toward Finnish and English vocabulary.
+# Include wake words, commands, and common phrases to reduce mishearings.
 WHISPER_PROMPT = (
-    "Founderbot, hei botti, hello, moi, terve, kiitos, ole hyvä, "
-    "what, how, why, yes, no, kyllä, ei."
+    "Founderbot, founderbott, founder bot, hei botti, hei robotti, founderbotti, "
+    "play, skip, pause, resume, stop, queue, music, song, soita, tauko, seuraava, lisää jonoon, "
+    "miten voit, voisitko, kerro, mitä, miksi, milloin, missä, mikä, kuka, "
+    "ruokalista, lounas, reaktori, newton, konehuone, hertsi, menu, lunch, "
+    "paljonko kello on, aika, time, joke, vitsi, tell me a joke, "
+    "what, how, why, when, where, yes, no, kyllä, ei, joo, ok, selvä, kiitos, ole hyvä, "
+    "hello, moi, terve, hei, moro, moikka, näkemiin, hei hei, goodbye, bye."
 )
 
 
@@ -117,7 +123,14 @@ def transcribe(
         except Exception as exc:  # noqa: BLE001
             print(f"[Denoiser error] {exc}", file=sys.stderr)
     t0 = time.monotonic()
-    segments, info = model.transcribe(audio, task="transcribe", initial_prompt=WHISPER_PROMPT)
+    segments, info = model.transcribe(
+        audio,
+        task="transcribe",
+        language="fi",
+        initial_prompt=WHISPER_PROMPT,
+        condition_on_previous_text=True,
+        no_speech_threshold=0.5,
+    )
     text = "".join(seg.text for seg in segments).strip()
     print(f"[Timing] Whisper ({len(audio)/VAD_SAMPLE_RATE:.1f}s audio): {time.monotonic()-t0:.2f}s")
     if text:
@@ -175,6 +188,13 @@ def listen_forever() -> None:
     vad_frame_len = int(VAD_SAMPLE_RATE * VAD_FRAME_DURATION_MS / 1000)
 
     engine = ConversationEngine()
+    try:
+        from Tools.music import check_music_ready
+
+        check_music_ready()
+    except Exception:
+        pass
+
     threading.Thread(
         target=_transcription_worker,
         args=(model, native_sr),
@@ -210,6 +230,7 @@ def listen_forever() -> None:
         callback=audio_callback,
     ):
         print(f"[Engine] OFFLINE. Say '{engine.wake_word}' to wake me up.")
+        print("[Engine] When ONLINE: music (play, skip, pause, resume, stop), menu, time, joke.")
         try:
             while True:
                 chunk = audio_queue.get()
