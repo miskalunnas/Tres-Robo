@@ -1,0 +1,9 @@
+# Robolabs
+
+Robolabs on viikonlopun työpaja jossa voit rakentaa mitä tahansa robotiikkaan liittyvää. Tuomme robotiikan kaikille.
+
+## Miten toimii
+- Suunnittelupäivä 10.2.: ideat, osien valinta, tilaus
+- Rakennusviikonloppu 6.–8.3.: suunnitelmat todeksi
+- Tarjoamme resurssit ja apua; sinulta tulee uteliaisuus ja motivaatio
+- Rajallinen määrä paikkoja — ilmoitamme mahdollisimman pian

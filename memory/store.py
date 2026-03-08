@@ -378,34 +378,47 @@ class MemoryStore:
         )
 
     def search_knowledge(self, query: str, *, limit: int = 8) -> list[str]:
-        """Full-text search over the knowledge base. Returns list of content strings.
-        Table should be seeded via scripts/seed_knowledge.py for TRES/SFP content.
-        """
+        """Search the knowledge base. Uses FTS5 if available, else LIKE (works without FTS5)."""
         query = query.strip()
         if not query:
             return []
-        # FTS5: escape double-quotes, truncate to avoid long-query issues
-        fts_query = query.replace('"', '""').strip()[:500]
-        if not fts_query:
-            return []
+        # Try FTS5 first (faster, better ranking)
         try:
-            rows = self._fetchall(
-                """
-                SELECT k.content
-                FROM knowledge k
-                INNER JOIN (
-                    SELECT rowid FROM knowledge_fts
-                    WHERE knowledge_fts MATCH ?
-                    LIMIT ?
-                ) f ON k.id = f.rowid
-                ORDER BY f.rowid
-                """,
-                (fts_query, limit),
-            )
-            return [row["content"] for row in rows]
+            fts_query = query.replace('"', '""').strip()[:500]
+            if fts_query:
+                rows = self._fetchall(
+                    """
+                    SELECT k.content FROM knowledge k
+                    INNER JOIN (
+                        SELECT rowid FROM knowledge_fts WHERE knowledge_fts MATCH ?
+                        LIMIT ?
+                    ) f ON k.id = f.rowid ORDER BY f.rowid
+                    """,
+                    (fts_query, limit),
+                )
+                return [row["content"] for row in rows]
         except sqlite3.OperationalError:
-            # FTS syntax error or no match
+            pass
+        # Fallback: LIKE search (works when FTS5 not available, e.g. Raspberry Pi)
+        terms = [t.strip() for t in query.split() if len(t.strip()) >= 2][:5]
+        if not terms:
             return []
+        like_clause = " AND ".join(
+            "(k.content LIKE ? OR k.source LIKE ?)" for _ in terms
+        )
+        params = []
+        for t in terms:
+            params.extend([f"%{t}%", f"%{t}%"])
+        params.append(limit)
+        rows = self._fetchall(
+            f"""
+            SELECT content FROM knowledge k
+            WHERE {like_clause}
+            ORDER BY id DESC LIMIT ?
+            """,
+            tuple(params),
+        )
+        return [row["content"] for row in rows]
 
     def clear_knowledge(self) -> int:
         """Remove all knowledge base entries. Returns number of rows deleted. For re-seeding."""
@@ -413,6 +426,57 @@ class MemoryStore:
             cursor = self._conn.execute("DELETE FROM knowledge")
             self._conn.commit()
             return cursor.rowcount
+
+    def ensure_knowledge_loaded(self, dir_path: Path | None = None) -> int:
+        """Load knowledge from text files if the knowledge table is empty. Returns chunks loaded."""
+        row = self._fetchone("SELECT COUNT(*) as n FROM knowledge")
+        if row and row["n"] > 0:
+            return 0
+        return self.load_knowledge_from_text_dir(dir_path)
+
+    def load_knowledge_from_text_dir(self, dir_path: Path | None = None) -> int:
+        """Load knowledge from data/knowledge/*.txt. Each file = one source; paragraphs = chunks.
+        Returns number of chunks inserted. Replaces existing knowledge."""
+        if dir_path is None:
+            dir_path = self._path.parent.parent / "data" / "knowledge"
+        if not dir_path.is_dir():
+            return 0
+        self.clear_knowledge()
+        count = 0
+        for f in sorted(dir_path.glob("*.txt")):
+            try:
+                text = f.read_text(encoding="utf-8").strip()
+                if not text:
+                    continue
+                source = f.stem
+                for para in text.split("\n\n"):
+                    para = para.strip()
+                    if para:
+                        self.add_knowledge(source, para)
+                        count += 1
+            except Exception:
+                pass
+        return count
+
+    def get_context_as_text(
+        self,
+        query: str,
+        *,
+        person_id: str | None = None,
+        knowledge_limit: int = 6,
+        memory_limit: int = 5,
+        include_knowledge: bool = True,
+    ) -> str:
+        """Return context as plain text: memory facts + optionally knowledge search results."""
+        parts: list[str] = []
+        memory = self.render_memory_context(person_id, limit=memory_limit)
+        if memory:
+            parts.append("Muisti (käyttäjä/istunto):\n" + memory)
+        if include_knowledge:
+            hits = self.search_knowledge(query, limit=knowledge_limit)
+            if hits:
+                parts.append("Tietopohja:\n" + "\n\n".join(hits))
+        return "\n\n".join(parts) if parts else ""
 
     # ------------------------------------------------------------------
     # Events / tool calls
@@ -493,8 +557,23 @@ class MemoryStore:
         with self._lock:
             return self._conn.execute(query, params).fetchall()
 
+    def _drop_fts5_if_exists(self) -> None:
+        """Drop FTS5 table and triggers so DB works on systems without FTS5 (e.g. Raspberry Pi)."""
+        with self._lock:
+            for name in ("knowledge_fts_ai", "knowledge_fts_ad", "knowledge_fts_au"):
+                try:
+                    self._conn.execute(f"DROP TRIGGER IF EXISTS {name}")
+                except sqlite3.OperationalError:
+                    pass
+            try:
+                self._conn.execute("DROP TABLE IF EXISTS knowledge_fts")
+            except sqlite3.OperationalError:
+                pass
+            self._conn.commit()
+
     def _ensure_schema(self) -> None:
         with self._lock:
+            self._drop_fts5_if_exists()
             self._conn.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS persons (
@@ -578,23 +657,7 @@ class MemoryStore:
                     created_at TEXT NOT NULL
                 );
 
-                CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_fts USING fts5(
-                    content,
-                    source,
-                    content='knowledge',
-                    content_rowid='id'
-                );
-
-                CREATE TRIGGER IF NOT EXISTS knowledge_fts_ai AFTER INSERT ON knowledge BEGIN
-                    INSERT INTO knowledge_fts(rowid, content, source) VALUES (new.id, new.content, new.source);
-                END;
-                CREATE TRIGGER IF NOT EXISTS knowledge_fts_ad AFTER DELETE ON knowledge BEGIN
-                    INSERT INTO knowledge_fts(knowledge_fts, rowid, content, source) VALUES ('delete', old.id, old.content, old.source);
-                END;
-                CREATE TRIGGER IF NOT EXISTS knowledge_fts_au AFTER UPDATE ON knowledge BEGIN
-                    INSERT INTO knowledge_fts(knowledge_fts, rowid, content, source) VALUES ('delete', old.id, old.content, old.source);
-                    INSERT INTO knowledge_fts(rowid, content, source) VALUES (new.id, new.content, new.source);
-                END;
+                CREATE INDEX IF NOT EXISTS idx_knowledge_source ON knowledge(source);
 
                 CREATE INDEX IF NOT EXISTS idx_face_embeddings_person_id
                     ON face_embeddings(person_id);

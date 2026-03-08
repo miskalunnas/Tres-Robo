@@ -352,21 +352,41 @@ class MusicPlayer:
         return had_process
 
     def volume_up(self) -> int:
-        """Increase volume by 10 (0–100). Restarts current track if playing so change applies. Returns new volume."""
+        """Increase volume by 10 (0–100). Uses mpv IPC when available; otherwise restarts. Returns new volume."""
         with self._lock:
             self._volume = min(100, self._volume + 10)
-            if self._process and self._current_query:
+            if self._ducked:
+                self._saved_volume_before_duck = self._volume
+            if self._process and self._player_cmd == "mpv" and self._ipc_socket_path:
+                vol = self._volume
+            else:
+                vol = None
+            if vol is None and self._process and self._current_query:
                 self._queue.appendleft(self._current_query)
+        if vol is not None:
+            self._mpv_send_volume(vol)
+            print(f"[Music] Volume up → {self._volume}%")
+            return self._volume
         self._kill_current()
         print(f"[Music] Volume up → {self._volume}%")
         return self._volume
 
     def volume_down(self) -> int:
-        """Decrease volume by 10 (0–100). Restarts current track if playing. Returns new volume."""
+        """Decrease volume by 10 (0–100). Uses mpv IPC when available; otherwise restarts. Returns new volume."""
         with self._lock:
             self._volume = max(0, self._volume - 10)
-            if self._process and self._current_query:
+            if self._ducked:
+                self._saved_volume_before_duck = self._volume
+            if self._process and self._player_cmd == "mpv" and self._ipc_socket_path:
+                vol = self._volume
+            else:
+                vol = None
+            if vol is None and self._process and self._current_query:
                 self._queue.appendleft(self._current_query)
+        if vol is not None:
+            self._mpv_send_volume(vol)
+            print(f"[Music] Volume down → {self._volume}%")
+            return self._volume
         self._kill_current()
         print(f"[Music] Volume down → {self._volume}%")
         return self._volume

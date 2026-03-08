@@ -63,6 +63,7 @@ class ConversationEngine:
 
     def __init__(self) -> None:
         self._store = MemoryStore()
+        self._store.ensure_knowledge_loaded()
         self._brain = Brain(self._store)
         self._online = False
         self._last_activity = time.monotonic()
@@ -520,6 +521,22 @@ class ConversationEngine:
                 add_to_queue(query)
                 return f"Added {query} to the queue."
             return "What should I add to the queue?"
+        if name == "music_volume_up":
+            from Tools.music import volume_up
+
+            vol = volume_up()
+            return f"Volume {vol}%."
+        if name == "music_volume_down":
+            from Tools.music import volume_down
+
+            vol = volume_down()
+            return f"Volume {vol}%."
+        if name == "lookup_knowledge":
+            query = (args.get("query") or "").strip() or "TRES SFP Robolabs"
+            hits = self._store.search_knowledge(query, limit=6)
+            if not hits:
+                return "No matching info in knowledge base."
+            return "\n\n".join(hits[:6])
         return ""
 
     def _log_user_message(self, text: str) -> None:

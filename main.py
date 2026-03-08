@@ -57,6 +57,7 @@ WHISPER_MODEL = "small"
 WHISPER_PROMPT = (
     "Founderbot, founderbott, founder bot, found a bot, founder bott, hei botti, hei bot, founderbotti, hei robotti. "
     "Soita, soita musiikki, play, skip, seuraava, tauko, pause, jatka, resume, lopeta, stop, queue. "
+    "Volume, volume up, volume down, louder, quieter, kovempaa, hiljempaa, ääni ylös, ääni alas. "
     "Kello, mitä kello on, paljonko kello, aika, time. Vitsi, kerro vitsi, joke. "
     "Ruokalista, lounaslista, mitä ruokana, reaktori, newton, menu, lunch. "
     "Moi, hei, moro, terve, moikka, päivää, kiitos, joo, ei, kyllä, selvä. "

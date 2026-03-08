@@ -1,0 +1,16 @@
+# Robotin komennot
+
+## Musiikki
+- soita / play [hakusana]
+- lisää jonoon [hakusana]
+- seuraava / skip
+- tauko / pause
+- jatka / resume
+- lopeta / stop
+- ääni ylös / volume up
+- ääni alas / volume down
+
+## Muut
+- Ruokalistat (reaktori, newton, konehuone, hertsi)
+- Aika ("paljonko kello")
+- Vitsi

@@ -89,6 +89,39 @@ LLM_TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "music_volume_up",
+            "description": "Increase music volume. Use when the user wants louder music (e.g. 'louder', 'kovemmalle', 'tee ääni kovemmaksi').",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "music_volume_down",
+            "description": "Decrease music volume. Use when the user wants quieter music (e.g. 'quieter', 'hiljemmalle', 'tee ääni hiljemmaksi').",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "lookup_knowledge",
+            "description": "Search the knowledge base ONLY when context above lacks the answer. Use for specific facts about TRES, SFP, Robolabs, people, or commands. Do NOT call for greetings, music, time, or when you already have the info.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Search query, e.g. 'SFP dates', 'TRES benefits', 'robolabs', 'robot commands'.",
+                    }
+                },
+                "required": ["query"],
+            },
+        },
+    },
 ]
 
 
@@ -422,45 +455,45 @@ class Brain:
                     "content": f"Edellinen istunto (yhteenveto): {prev_summary}",
                 }
             )
-        memory_context = self._store.render_memory_context(person_id, limit=5)
-        if memory_context:
-            messages.append(
-                {
-                    "role": "system",
-                    "content": (
-                        "Tiedot käyttäjästä ja aiemmista istunnoista:\n"
-                        f"{memory_context}"
-                    ),
-                }
-            )
-        # Hae tietopohjasta vain jos viesti viittaa TRES/SFP/Robolabs-aiheisiin
+        # Muisti aina; tietopohja vain kun viesti viittaa TRES/SFP/persona-aiheisiin
         _KNOWLEDGE_TRIGGERS = frozenset([
-            "tres", "sfp", "summer founder", "robolabs", "robotics",
+            "tres", "sfp", "summer founder", "robolabs", "robolab",
             "kahvi", "coffee", "3d", "3d-tulostin", "printer",
-            "consultant", "konsultti", "kova labs", "demo day",
-            "san francisco", "tampere", "yhteisö", "community",
-            "ohjelma", "program", "häviäj", "builder", "build with",
+            "konsultti", "consultant", "kova labs", "demo day",
+            "tampere", "yhteisö", "community", "ohjelma", "program",
+            "häviäj", "builder", "build with", "navigator", "excu",
+            "isäntä", "raba", "röbö", "pöhinä", "founderi",
+            "netta", "jooel", "miska", "oliver", "arttu", "jani",
+            "lauri", "smoothlage", "olli", "miro",
+            "mikä", "mitä", "miten", "kuka", "milloin", "missä",
         ])
         text_lower = user_text.strip().lower()
         may_need_knowledge = len(text_lower) >= 3 and any(
             t in text_lower for t in _KNOWLEDGE_TRIGGERS
         )
-        knowledge_hits = (
-            self._store.search_knowledge(user_text, limit=4)
-            if may_need_knowledge
-            else []
+        context_text = self._store.get_context_as_text(
+            user_text,
+            person_id=person_id,
+            knowledge_limit=6,
+            memory_limit=5,
+            include_knowledge=may_need_knowledge,
         )
-        if knowledge_hits:
-            trimmed = [c[:260].rstrip() + ("..." if len(c) > 260 else "") for c in knowledge_hits]
+        if context_text:
             messages.append(
                 {
                     "role": "system",
-                    "content": (
-                        "Tietopohja (hakusana):\n"
-                        + "\n\n".join(trimmed)
-                    ),
+                    "content": f"Konteksti (muisti + tietopohja):\n{context_text}",
                 }
             )
+        messages.append(
+            {
+                "role": "system",
+                "content": (
+                    "Käytä lookup_knowledge vain jos kontekstissa ei ole vastausta "
+                    "ja tarvitset faktoja (TRES, SFP, Robolabs, henkilöt). Älä kutsu turhaan."
+                ),
+            }
+        )
         messages.extend(self._store.get_session_messages(session_id, limit=8))
         return messages
 

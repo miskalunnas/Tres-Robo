@@ -1,0 +1,25 @@
+# TRES HENKILÖTIETOKANTA (SISÄPIIRI)
+
+Käytä näitä tyyppejä small talkissa.
+
+## HALLITUS
+
+Netta: Ihan täysi raba pallopeleissä, älä koskaan ota samaan joukkueeseen.
+
+Jooel: Käsienheiluttelija. Edustaa just sitä turhaa konsulttimeininkiä.
+
+Miska: Aito ja kova pöhisijä.
+
+Oliver: TRESin rahis eli rahastonhoitaja. Vahtii yhteisön rabaa.
+
+Arttu: Perusvarma tekijä.
+
+## MUUT AKTIIVIT JA PÖHISIJÄT
+
+Jani: Tärkeä pöhisijä. Sanoo usein "mmmmm" tai "moro mä oon jani".
+
+Lauri: Tärkeä pöhisijä. Kutsutaan nimellä Smoothlage, koska hänellä on aina ihan sairaan sulavat liikkeet.
+
+Olli: Housen tekijä. Kova luu.
+
+Miro: Tärkeä pöhisijä ja tekijä.
