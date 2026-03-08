@@ -34,10 +34,11 @@ VAD_AGGRESSIVENESS = 2
 VAD_FRAME_DURATION_MS = 30
 
 # Segmenting: how much audio to collect before sending to Whisper.
-# Pienempi MIN = lyhyet herätyssanat ("hei bot", "founderbot") pääsevät Whisperiin.
 MIN_SEGMENT_SECONDS = 0.5
 MAX_SEGMENT_SECONDS = 8.0
-# Kun musiikki soi: korkeampi kynnys = botti ei keskeytä musiikkia lyhyellä puheella.
+# OFFLINE: herätys sujuvampi — lyhyet "hei bot" pääsevät läpi.
+MIN_SEGMENT_WHEN_OFFLINE = 0.4
+# ONLINE + musiikki: korkeampi kynnys = botti ei keskeytä musiikkia lyhyellä puheella.
 MIN_SEGMENT_WHEN_MUSIC_PLAYING = 1.2
 # Hiljaisuus ennen kuin lähetetään Whisperille: isompi = botti ei puhu päälle, pienempi = nopeampi vastaus.
 MAX_SILENCE_BETWEEN_SPEECH_SECONDS = 0.9
@@ -56,9 +57,11 @@ USE_DENOISER = False
 
 # Whisper model: "tiny" = nopein, "base" = nopea kompromissi, "small"/"medium" = tarkempi suomeen.
 WHISPER_MODEL = "small"
-# Whisper: keskeiset fraasit ja oikeat muodot auttavat tunnistusta (base/small). Herätyssanat tulee pitää täydellisinä.
+# Whisper: herätyssanat ensin (tärkein kauempaa puhuttaessa). Fraasit auttavat tunnistusta.
 WHISPER_PROMPT = (
-    "Founderbot, founderbott, founder bot, found a bot, founder bott, hei botti, hei bot, founderbotti, hei robotti. "
+    "Founderbot, founderbott, founder bot, found a bot, founder bott, founderbotti. "
+    "Hei botti, hei bot, hei robot, hei robotti. Kuule botti, kuule bot, bot kuule, botti kuule. "
+    "Terve botti, terve bot, moro botti, moro bot, moi botti, moi bot. Ok bot, okay bot, yo bot. "
     "Soita, soita musiikki, play, skip, seuraava, tauko, pause, jatka, resume, lopeta, stop, queue, poista kaikki, clear. "
     "Volume, volume up, volume down, louder, quieter, kovempaa, hiljempaa, ääni ylös, ääni alas. "
     "Kello, mitä kello on, paljonko kello, aika, time. Vitsi, kerro vitsi, joke. "
@@ -138,7 +141,8 @@ def _prepare_audio(frames: list[np.ndarray], native_sr: int) -> np.ndarray:
             print(f"[Denoiser error] {exc}", file=sys.stderr)
     peak = np.abs(audio).max()
     if peak > 1e-4:
-        audio = audio * min(0.95 / peak, 3.0)
+        # Kauempaa puhuttaessa ääni on hiljaisempi — vahvistus jopa 5x
+        audio = audio * min(0.95 / peak, 5.0)
     return audio
 
 
@@ -185,7 +189,7 @@ def transcribe(
 ) -> tuple[str, str]:
     """Prepare audio and run STT. Returns (text, language_code)."""
     audio = _prepare_audio(frames, native_sr)
-    if np.abs(audio).max() < 0.08:
+    if np.abs(audio).max() < 0.05:
         return "", ""
     if USE_CLOUD_STT:
         return _transcribe_cloud(audio)
@@ -292,7 +296,7 @@ def listen_forever() -> None:
         channels=1,
         callback=audio_callback,
     ):
-        print(f"[Engine] OFFLINE. Say '{engine.wake_word}' to wake me up.")
+        print(f"[Engine] OFFLINE. Say 'founderbot', 'hei bot' or 'kuule bot' to wake me up.")
         print("[Engine] When ONLINE: music (play, skip, pause, resume, stop), menu, time, joke.")
         try:
             while True:
@@ -367,11 +371,12 @@ def listen_forever() -> None:
                         else:
                             try:
                                 from Tools.music import is_playing
-                                min_segment = (
-                                    MIN_SEGMENT_WHEN_MUSIC_PLAYING
-                                    if is_playing()
-                                    else MIN_SEGMENT_SECONDS
-                                )
+                                if is_playing() and engine.is_online():
+                                    min_segment = MIN_SEGMENT_WHEN_MUSIC_PLAYING
+                                elif not engine.is_online():
+                                    min_segment = MIN_SEGMENT_WHEN_OFFLINE
+                                else:
+                                    min_segment = MIN_SEGMENT_SECONDS
                             except Exception:
                                 min_segment = MIN_SEGMENT_SECONDS
                         if silence_duration >= max_silence:

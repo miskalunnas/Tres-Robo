@@ -17,15 +17,34 @@ from Tools.commands import parse_command
 from voice.tts import SpeechHandle, interrupt as interrupt_speech, speak
 
 WAKE_WORDS = [
+    # Founderbot (täsmälliset)
     "founderbot",
     "founderbott",
     "founder bot",
     "found a bot",
     "founder bott",
+    "founderbotti",
+    # Hei + bot
     "hei botti",
     "hei bot",
-    "founderbotti",
+    "hei robot",
     "hei robotti",
+    # Kuule + bot (selkeä adressointi)
+    "kuule botti",
+    "kuule bot",
+    "bot kuule",
+    "botti kuule",
+    # Tervehdys + bot
+    "terve botti",
+    "terve bot",
+    "moro botti",
+    "moro bot",
+    "moi botti",
+    "moi bot",
+    # Lyhyet (kauempaa puhuttaessa)
+    "ok bot",
+    "okay bot",
+    "yo bot",
 ]
 SESSION_END_PATTERNS = (
     re.compile(r"\b(?:goodbye|bye(?: bye)?|näkemiin|hei hei|moi moi)\b"),
@@ -64,6 +83,9 @@ INACTIVITY_TIMEOUT = 60.0  # seconds of silence before going offline
 
 class ConversationEngine:
     wake_word = WAKE_WORDS[0]
+
+    def is_online(self) -> bool:
+        return self._online
 
     def __init__(self) -> None:
         self._store = MemoryStore()
@@ -206,7 +228,7 @@ class ConversationEngine:
         self._online = False
         self._session_id = None
         self._brain.reset()
-        print(f"[Engine] OFFLINE. Say '{WAKE_WORDS[0]}' to wake me up.")
+        print("[Engine] OFFLINE. Say 'founderbot', 'hei bot' or 'kuule bot' to wake me up.")
 
     def _process_online_text(
         self,
