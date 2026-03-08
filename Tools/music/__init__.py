@@ -378,7 +378,7 @@ class MusicPlayer:
             msg = json.dumps({"command": ["set_property", "volume", volume]}) + "\n"
             if os.name == "nt":
                 # Windows: named pipe \\.\pipe\<name>
-                pipe_path = r"\\.\pipe\" + path
+                pipe_path = r"\\.\pipe" + "\\" + path
                 with open(pipe_path, "wb") as f:
                     f.write(msg.encode("utf-8"))
             else:
