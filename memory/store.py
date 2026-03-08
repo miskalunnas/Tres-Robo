@@ -207,6 +207,31 @@ class MemoryStore:
             (_utc_now(), end_reason, session_id),
         )
 
+    def update_session_summary(self, session_id: str, summary: str) -> None:
+        """Store a one-sentence summary of the session (used for next-session context)."""
+        self._execute(
+            "UPDATE sessions SET summary = ? WHERE id = ?",
+            (summary.strip()[:500], session_id),
+        )
+
+    def get_previous_session_summary(
+        self, person_id: str | None, *, exclude_session_id: str
+    ) -> str | None:
+        """Return the summary of the most recent ended session for this person, if any."""
+        if not person_id:
+            return None
+        row = self._fetchone(
+            """
+            SELECT summary FROM sessions
+            WHERE person_id = ? AND ended_at IS NOT NULL
+              AND id != ? AND summary IS NOT NULL AND summary != ''
+            ORDER BY ended_at DESC
+            LIMIT 1
+            """,
+            (person_id, exclude_session_id),
+        )
+        return row["summary"] if row else None
+
     def attach_person_to_session(self, session_id: str, person_id: str) -> None:
         self._execute(
             "UPDATE sessions SET person_id = ? WHERE id = ?",
@@ -336,6 +361,57 @@ class MemoryStore:
         )
 
     # ------------------------------------------------------------------
+    # Knowledge base (FTS)
+    # ------------------------------------------------------------------
+
+    def add_knowledge(self, source: str, content: str) -> None:
+        """Add a text chunk to the searchable knowledge base."""
+        content = content.strip()
+        if not content:
+            return
+        self._execute(
+            """
+            INSERT INTO knowledge (source, content, created_at)
+            VALUES (?, ?, ?)
+            """,
+            (source.strip()[:200], content[:10000], _utc_now()),
+        )
+
+    def search_knowledge(self, query: str, *, limit: int = 8) -> list[str]:
+        """Full-text search over the knowledge base. Returns list of content strings."""
+        query = query.strip()
+        if not query:
+            return []
+        # FTS5: escape double-quotes and avoid empty MATCH
+        fts_query = query.replace('"', '""').strip()
+        if not fts_query:
+            return []
+        try:
+            rows = self._fetchall(
+                """
+                SELECT k.content
+                FROM knowledge k
+                JOIN (
+                    SELECT rowid FROM knowledge_fts
+                    WHERE knowledge_fts MATCH ?
+                    LIMIT ?
+                ) f ON k.id = f.rowid
+                """,
+                (fts_query, limit),
+            )
+            return [row["content"] for row in rows]
+        except sqlite3.OperationalError:
+            # FTS syntax error or no match
+            return []
+
+    def clear_knowledge(self) -> int:
+        """Remove all knowledge base entries. Returns number of rows deleted. For re-seeding."""
+        with self._lock:
+            cursor = self._conn.execute("DELETE FROM knowledge")
+            self._conn.commit()
+            return cursor.rowcount
+
+    # ------------------------------------------------------------------
     # Events / tool calls
     # ------------------------------------------------------------------
 
@@ -444,6 +520,7 @@ class MemoryStore:
                     ended_at TEXT,
                     wake_word TEXT NOT NULL,
                     end_reason TEXT,
+                    summary TEXT,
                     FOREIGN KEY(person_id) REFERENCES persons(id) ON DELETE SET NULL
                 );
 
@@ -491,6 +568,31 @@ class MemoryStore:
                     FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
                 );
 
+                CREATE TABLE IF NOT EXISTS knowledge (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    source TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+
+                CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_fts USING fts5(
+                    content,
+                    source,
+                    content='knowledge',
+                    content_rowid='id'
+                );
+
+                CREATE TRIGGER IF NOT EXISTS knowledge_fts_ai AFTER INSERT ON knowledge BEGIN
+                    INSERT INTO knowledge_fts(rowid, content, source) VALUES (new.id, new.content, new.source);
+                END;
+                CREATE TRIGGER IF NOT EXISTS knowledge_fts_ad AFTER DELETE ON knowledge BEGIN
+                    INSERT INTO knowledge_fts(knowledge_fts, rowid, content, source) VALUES ('delete', old.id, old.content, old.source);
+                END;
+                CREATE TRIGGER IF NOT EXISTS knowledge_fts_au AFTER UPDATE ON knowledge BEGIN
+                    INSERT INTO knowledge_fts(knowledge_fts, rowid, content, source) VALUES ('delete', old.id, old.content, old.source);
+                    INSERT INTO knowledge_fts(rowid, content, source) VALUES (new.id, new.content, new.source);
+                END;
+
                 CREATE INDEX IF NOT EXISTS idx_face_embeddings_person_id
                     ON face_embeddings(person_id);
 
@@ -518,6 +620,18 @@ class MemoryStore:
                 """
             )
             self._conn.commit()
+        self._migrate_sessions_summary()
+
+    def _migrate_sessions_summary(self) -> None:
+        """Add summary column to sessions if missing (for existing DBs)."""
+        with self._lock:
+            row = self._conn.execute(
+                "PRAGMA table_info(sessions)"
+            ).fetchall()
+            columns = [r[1] for r in row]
+            if "summary" not in columns:
+                self._conn.execute("ALTER TABLE sessions ADD COLUMN summary TEXT")
+                self._conn.commit()
 
     @staticmethod
     def _row_to_person(row: sqlite3.Row | None) -> PersonRecord | None:

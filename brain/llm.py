@@ -344,11 +344,10 @@ class Brain:
             return
 
         summary_prompt = (
-            "Extract up to 5 durable memory facts for a home robot assistant. "
-            "Only return stable, useful facts such as name preference, recurring interests, "
-            "important routines, or explicit likes/dislikes. "
-            "Do not include temporary requests or small talk. "
-            "Return strict JSON as a list of objects with keys: category, key, value, confidence."
+            "Extract from this conversation:\n"
+            "1) Up to 5 durable memory facts for a home robot assistant (stable facts: name preference, interests, routines, likes/dislikes).\n"
+            "2) One short sentence summarizing what this session was about (e.g. 'Keskusteltiin musiikista ja tilattiin pizza.').\n"
+            "Return strict JSON with exactly two keys: \"facts\" (list of objects with category, key, value, confidence) and \"session_summary\" (string, one sentence)."
         )
 
         try:
@@ -360,11 +359,16 @@ class Brain:
                 ],
                 timeout=30,
             )
-            raw = response.choices[0].message.content or "[]"
-            facts = json.loads(raw)
+            raw = response.choices[0].message.content or "{}"
+            data = json.loads(raw)
         except Exception as exc:
             print(f"[Brain] Memory summary skipped: {exc}")
             return
+
+        facts = data.get("facts") if isinstance(data, dict) else []
+        session_summary = data.get("session_summary") if isinstance(data, dict) else None
+        if isinstance(session_summary, str) and session_summary.strip():
+            self._store.update_session_summary(session_id, session_summary.strip())
 
         if not isinstance(facts, list):
             return
@@ -407,14 +411,52 @@ class Brain:
             return self._history
 
         messages: list[dict] = [{"role": "system", "content": SYSTEM_PROMPT}]
+        prev_summary = self._store.get_previous_session_summary(
+            person_id, exclude_session_id=session_id
+        )
+        if prev_summary:
+            messages.append(
+                {
+                    "role": "system",
+                    "content": f"Edellinen istunto (yhteenveto): {prev_summary}",
+                }
+            )
         memory_context = self._store.render_memory_context(person_id, limit=8)
         if memory_context:
             messages.append(
                 {
                     "role": "system",
                     "content": (
-                        "Known durable context about the current user and prior sessions:\n"
+                        "Tiedot käyttäjästä ja aiemmista istunnoista:\n"
                         f"{memory_context}"
+                    ),
+                }
+            )
+        # Hae tietopohjasta vain jos viesti viittaa TRES/SFP/Robolabs-aiheisiin
+        _KNOWLEDGE_TRIGGERS = frozenset([
+            "tres", "sfp", "summer founder", "robolabs", "robotics",
+            "kahvi", "coffee", "3d", "3d-tulostin", "printer",
+            "consultant", "konsultti", "kova labs", "demo day",
+            "san francisco", "tampere", "yhteisö", "community",
+            "ohjelma", "program", "häviäj", "builder", "build with",
+        ])
+        text_lower = user_text.strip().lower()
+        may_need_knowledge = len(text_lower) >= 3 and any(
+            t in text_lower for t in _KNOWLEDGE_TRIGGERS
+        )
+        knowledge_hits = (
+            self._store.search_knowledge(user_text, limit=8)
+            if may_need_knowledge
+            else []
+        )
+        if knowledge_hits:
+            trimmed = [c[:400].rstrip() + ("..." if len(c) > 400 else "") for c in knowledge_hits]
+            messages.append(
+                {
+                    "role": "system",
+                    "content": (
+                        "Tietopohja (hakusana):\n"
+                        + "\n\n".join(trimmed)
                     ),
                 }
             )
