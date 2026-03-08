@@ -112,34 +112,37 @@ class MusicPlayer:
 
     @staticmethod
     def _resolve_url(query: str) -> str | None:
-        """Use yt-dlp to turn a search query into a direct audio URL."""
-        cmd = [
-            sys.executable, "-m", "yt_dlp",
-            "-g", "-f", "bestaudio/best",
-            "--no-playlist",
-            "--default-search", "ytsearch",
-            f"ytsearch1:{query}",
-        ]
-        if _YT_COOKIES_FILE and os.path.isfile(_YT_COOKIES_FILE):
-            cmd.extend(["--cookies", _YT_COOKIES_FILE])
-        try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=20,
-            )
-        except subprocess.TimeoutExpired:
-            print("[Music] Search timed out.", file=sys.stderr)
-            return None
-        except FileNotFoundError:
-            print("[Music] yt-dlp not found. Install with: pip install yt-dlp", file=sys.stderr)
-            return None
+        """Use yt-dlp to turn a search query into a direct audio URL. Retries with fallback if first attempt fails."""
+        for attempt, search_query in enumerate([query, f"{query} music", "lofi hip hop radio"]):
+            cmd = [
+                sys.executable, "-m", "yt_dlp",
+                "-g", "-f", "bestaudio/best",
+                "--no-playlist",
+                "--default-search", "ytsearch",
+                f"ytsearch1:{search_query}",
+            ]
+            if _YT_COOKIES_FILE and os.path.isfile(_YT_COOKIES_FILE):
+                cmd.extend(["--cookies", _YT_COOKIES_FILE])
+            try:
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=25,
+                )
+            except subprocess.TimeoutExpired:
+                print(f"[Music] Search timed out: {search_query!r}", file=sys.stderr)
+                continue
+            except FileNotFoundError:
+                print("[Music] yt-dlp not found. Install with: pip install yt-dlp", file=sys.stderr)
+                return None
 
-        if result.returncode != 0 or not (result.stdout or "").strip():
-            print(f"[Music] No result for: {query!r}", file=sys.stderr)
-            return None
-        return result.stdout.strip()
+            if result.returncode == 0 and (result.stdout or "").strip():
+                if attempt > 0:
+                    print(f"[Music] Resolved with fallback: {search_query!r}", file=sys.stderr)
+                return result.stdout.strip()
+        print(f"[Music] No result for: {query!r}", file=sys.stderr)
+        return None
 
     # ------------------------------------------------------------------
     # Subprocess launch

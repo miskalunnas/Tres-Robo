@@ -74,6 +74,10 @@ SESSION_END_PATTERNS = (
     re.compile(
         r"\b(?:siinä kaikki|tässä kaikki|ei muuta|ei muuta tällä erää|ollaan valmiita|se oli siinä|palataan myöhemmin|jutellaan myöhemmin|puhutaan myöhemmin|jatketaan myöhemmin)\b"
     ),
+    # "Lopetetaan puhuminen" — kun käyttäjä haluaa lopettaa keskustelun
+    re.compile(
+        r"\b(?:lopetetaan|lopetetaan puhuminen|lopetetaan tää|lopetetaan tämä|sopii näin|selvä kiitos|okei kiitos|okei selvä|kiitos hei|kiitos moi|kiitos näkemiin|ei tarvitse enää|en tarvitse enää|se siinä)\b"
+    ),
 )
 INTERRUPT_WORDS = [
     "stop",
@@ -277,10 +281,11 @@ class ConversationEngine:
         self._log_user_message(text)
 
         if self._is_session_end_intent(text):
-            self._speak_reply("Okay, going offline.", end_session_reason="goodbye")
+            bye_msg = {"en": "Okay, going offline.", "fi": "Hei hei!"}.get(language, "Hei hei!")
+            self._speak_reply(bye_msg, end_session_reason="goodbye")
             return
 
-        tool_result = handle_tool_speech(text)
+        tool_result = handle_tool_speech(text, language=language)
         if tool_result.handled:
             if self._session_id and tool_result.action:
                 self._store.log_tool_call(
@@ -402,7 +407,7 @@ class ConversationEngine:
                 args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
             except json.JSONDecodeError:
                 args = {}
-            result = self._execute_llm_tool(name, args)
+            result = self._execute_llm_tool(name, args, language=language)
             if result:
                 tool_results.append(result)
             if session_id:
@@ -584,52 +589,56 @@ class ConversationEngine:
             return True
         return False
 
-    def _execute_llm_tool(self, name: str, args: dict) -> str:
-        """Execute a tool invoked by the LLM. Returns a short phrase for TTS."""
+    def _execute_llm_tool(self, name: str, args: dict, *, language: str = "") -> str:
+        """Execute a tool invoked by the LLM. Returns a short phrase for TTS in user's language."""
+        from Tools import _tr
+
+        lang = "en" if language == "en" else "fi"
+
         if name == "play_music":
             from Tools.music import play_async
 
             query = (args.get("query") or "music").strip() or "music"
             play_async(query)
-            return f"Playing {query}."
+            return f"{_tr('play_ok', lang)}: {query}."
         if name == "music_skip":
             from Tools.music import skip
 
             ok = skip()
-            return "Skipping to next song." if ok else "Nothing playing to skip."
+            return f"{_tr('skip_ok', lang)}." if ok else f"{_tr('nothing_playing', lang)}."
         if name == "music_pause":
             from Tools.music import pause
 
             ok = pause()
-            return "Music paused." if ok else "Nothing to pause."
+            return f"{_tr('pause_ok', lang)}." if ok else f"{_tr('nothing_playing', lang)}."
         if name == "music_resume":
             from Tools.music import resume
 
             ok = resume()
-            return "Resuming playback." if ok else "Nothing to resume."
+            return f"{_tr('resume_ok', lang)}." if ok else f"{_tr('nothing_playing', lang)}."
         if name == "music_stop":
             from Tools.music import stop
 
             ok = stop()
-            return "Playback stopped." if ok else "Nothing was playing."
+            return f"{_tr('stop_ok', lang)}." if ok else f"{_tr('nothing_playing', lang)}."
         if name == "music_add_to_queue":
             from Tools.music import add_to_queue
 
             query = (args.get("query") or "").strip()
             if query:
                 add_to_queue(query)
-                return f"Added {query} to the queue."
-            return "What should I add to the queue?"
+                return f"{_tr('queue_ok', lang)}: {query}."
+            return "What should I add?" if lang == "en" else "Mitä lisätään?"
         if name == "music_volume_up":
             from Tools.music import volume_up
 
             vol = volume_up()
-            return f"Volume {vol}%."
+            return f"Volume {vol}%." if lang == "en" else f"Ääni {vol}%."
         if name == "music_volume_down":
             from Tools.music import volume_down
 
             vol = volume_down()
-            return f"Volume {vol}%."
+            return f"Volume {vol}%." if lang == "en" else f"Ääni {vol}%."
         if name == "get_menu":
             from Tools.menu import get_all_menus, get_menu
 

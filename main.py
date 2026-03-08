@@ -68,7 +68,8 @@ WHISPER_PROMPT = (
     "Ruokalista, lounaslista, mitä ruokana, reaktori, newton, menu, lunch. "
     "Moi, hei, moro, terve, moikka, päivää, kiitos, joo, ei, kyllä, selvä. "
     "Miten voit, pöhinä, pöhinää, voisitko, kerro, mitä, miksi, milloin, missä, mikä, kuka, apua, mitä osaat. "
-    "Näkemiin, hei hei, moi moi, goodbye, bye, siinä kaikki, ei muuta, palataan myöhemmin, mene lepotilaan."
+    "Näkemiin, hei hei, moi moi, goodbye, bye, siinä kaikki, ei muuta, palataan myöhemmin, mene lepotilaan. "
+    "Lopetetaan, lopetetaan puhuminen, kiitos hei, kiitos moi, selvä kiitos, okei kiitos, se siinä."
 )
 
 

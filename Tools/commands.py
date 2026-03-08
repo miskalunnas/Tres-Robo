@@ -14,22 +14,25 @@ Priority order:
 # ── Keyword groups ────────────────────────────────────────────────
 
 # Prefix keywords: the rest of the text after the keyword is the query.
-# Longer prefixes first so "play music" is not eaten by bare "play".
+# Longer prefixes first. Vain selkeät musiikkikomennot — ei "play" tai "laitetaan" yksin.
 PLAY_PREFIXES = (
     "put on some", "put on", "soita jotain", "soita musiikki", "soita",
-    "soittakaa", "laita soimaan", "laitetaan", "taustamusiikkia",
+    "soittakaa", "laita soimaan", "laitetaan jotain", "laitetaan",
+    "taustamusiikkia", "taustamusiikki",
     "play music", "play a song", "play song", "play some", "play me",
     "i want to hear", "i want to listen to", "i wanna hear",
     "let's listen to", "lets listen to",
     "can you play", "could you play",
-    "play",
 )
+# Ei pelkkä "play" tai "queue" — liian herkkä.
 QUEUE_PREFIXES = (
     "add to queue", "add to the queue", "lisää jonoon", "lisää listaan",
     "laita jonoon", "laita seuraavaksi", "seuraavaksi soita",
     "queue up", "put in queue", "put in the queue",
-    "enqueue", "queue",
+    "enqueue",
 )
+# Täytesanat: jos query on vain näitä, älä soita (ei "laitetaan vaikka" tms.)
+PLAY_QUERY_BLOCKLIST = frozenset({"vaikka", "sitten", "nyt", "vähän", "vahan", "ehkä", "ehka"})
 
 # Simple keywords (no query).
 SKIP_KEYWORDS = (
@@ -188,7 +191,7 @@ def parse_command(text: str) -> dict | None:
     for prefix in QUEUE_PREFIXES:
         if _word_match(prefix, normalized):
             query = _extract_after(text.strip(), prefix)
-            if not query:
+            if not query or query.lower().strip() in PLAY_QUERY_BLOCKLIST:
                 continue
             return {
                 "action": "music_queue",
@@ -201,6 +204,9 @@ def parse_command(text: str) -> dict | None:
             query = _extract_after(text.strip(), prefix)
             if not query:
                 query = "music"
+            # Älä triggeröi jos query on vain täytesana ("laitetaan vaikka" jne.)
+            if query.lower().strip() in PLAY_QUERY_BLOCKLIST:
+                continue
             return {
                 "action": "music_play",
                 "query": query,

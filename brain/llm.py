@@ -27,7 +27,7 @@ LLM_TOOLS = [
         "type": "function",
         "function": {
             "name": "play_music",
-            "description": "Soita musiikkia. Käytä kun käyttäjä haluaa musiikkia: 'laitetaan jotain rauhallista', 'taustamusiikkia', 'jotain rentoa', 'soita jazz', 'chill', 'lo-fi'. Viittaa edelliseen puheeseen: jos puhuttiin jazzista, query='jazz'.",
+            "description": "Soita musiikkia. Käytä VAIN kun käyttäjä selvästi pyytää soittamaan: 'soita jazz', 'laitetaan jotain rauhallista', 'taustamusiikkia', 'play chill'. ÄLÄ käytä kun käyttäjä vain mainitsee musiikin tai kysyy — vain kun pyytää soittamaan.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -467,6 +467,10 @@ class Brain:
     ) -> list[dict]:
         """Rakenna viestilista: system prompt + edellinen yhteenveto + 5 faktaa + (ehkä) 4 tietopohja-osumaa + 8 viimeisintä viestiä."""
         if self._store is None or not session_id:
+            if language:
+                _lh = {"fi": "suomea", "en": "englantia", "sv": "ruotsia", "de": "saksaa", "es": "espanjaa", "fr": "ranskaa"}
+                ld = _lh.get(language, language)
+                self._history.append({"role": "system", "content": f"Käyttäjä puhui {ld}. Vastaa samalla kielellä."})
             self._history.append({"role": "user", "content": user_text})
             return self._history
 
@@ -499,9 +503,9 @@ class Brain:
         # Kieli ja keskeytys: botti neutraali, vastaa aina käyttäjän kielellä
         hints: list[str] = []
         if language:
-            _lang_hints = {"fi": "suomea", "en": "englantia", "sv": "ruotsia", "de": "saksaa"}
+            _lang_hints = {"fi": "suomea", "en": "englantia", "sv": "ruotsia", "de": "saksaa", "es": "espanjaa", "fr": "ranskaa"}
             lang_desc = _lang_hints.get(language, language)
-            hints.append(f"Käyttäjä puhui {lang_desc}. Vastaa samalla kielellä.")
+            hints.append(f"Käyttäjä puhui {lang_desc}. Vastaa AINA samalla kielellä.")
         if interrupted:
             hints.append("Käyttäjä keskeytti sinut juuri. Vastaa lyhyesti ja ota se huomioon.")
         if hints:
