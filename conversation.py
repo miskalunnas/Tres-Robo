@@ -15,15 +15,22 @@ from brain import Brain
 
 # Fallback: tunnista kieli tekstistä kun Whisper ei palauta
 _ENGLISH_WORDS = frozenset(
-    "the a an is are was were be been being have has had do does did will would could should may might must shall can need what when where who which why how play stop skip pause resume time joke menu lunch volume hello hi hey yeah yes no ok okay cool thanks tell me about".split()
+    "the a an is are was were be been being have has had do does did will would could should may might must shall can need "
+    "what when where who which why how play stop skip pause resume time joke menu lunch volume hello hi hey yeah yes no ok okay cool thanks tell me about "
+    "next song something music see look wearing tired happy room table other see you later"
+.split()
 )
-# Lyhyet englanninkieliset fraasit (esim. "hey bot", "play something")
+# Lyhyet englanninkieliset fraasit (esim. "hey bot", "play something", "what do you see")
 _ENGLISH_PHRASE_PATTERNS = (
     re.compile(r"\b(?:hey|hi|hello|yo)\s+(?:bot|founder)\b", re.I),
     re.compile(r"\b(?:play|skip|pause|resume|stop)\s+\w*\b", re.I),
     re.compile(r"\b(?:what|how|when|where|why)\s+\w+\b", re.I),
     re.compile(r"\b(?:tell me|give me|show me)\b", re.I),
     re.compile(r"\b(?:i (?:am|want|need|like))\b", re.I),
+    re.compile(r"\b(?:what do you see|who is (?:there|here)|do i look)\b", re.I),
+    re.compile(r"\b(?:volume up|volume down|turn (?:up|down))\b", re.I),
+    re.compile(r"\b(?:next|previous)\s*(?:song|track)?\b", re.I),
+    re.compile(r"\b(?:how are you|what('s| is) up)\b", re.I),
 )
 
 
@@ -40,6 +47,9 @@ def _infer_language_from_text(text: str) -> str:
     if english_count >= 2 or (english_count >= 1 and len(words) <= 4):
         return "en"
     if any(p.search(t) for p in _ENGLISH_PHRASE_PATTERNS):
+        return "en"
+    # Yksi selvä englanninkielinen komento (play, skip, next, stop, ...) → en
+    if len(words) <= 2 and words & _ENGLISH_WORDS:
         return "en"
     return ""
 from memory import MemoryStore

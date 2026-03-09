@@ -143,19 +143,22 @@ LLM_TOOLS = [
         "function": {
             "name": "see",
             "description": (
-                "Your eyes — capture a photo and answer any visual question. "
-                "ALWAYS use this when you need to see something instead of guessing. "
-                "Use for: user appearance or emotion ('do I look happy?', 'am I tired?', 'what am I wearing?'), "
-                "who is in the room, what objects are visible, room layout, body language, "
-                "or any question where seeing is needed to answer accurately. "
-                "Never assume or make up visual information — look first."
+                "Your eyes — take a photo and answer a visual question. "
+                "You MUST call this whenever the user asks about something that can only be answered by looking. "
+                "TRIGGER: Call see if the user asks about: (1) how someone looks or feels (tired, happy, what they wear), "
+                "(2) who is in the room or who is present, (3) what is visible (objects, room, colors, what's on the table), "
+                "(4) body language or pose. "
+                "Examples that REQUIRE see: 'mitä näet?', 'näytänkö väsyneeltä?', 'kuka siellä on?', 'what do you see?', "
+                "'do I look happy?', 'what am I wearing?', 'onko täällä muita?', 'what's on the table?'. "
+                "Never answer a visual question from memory or by guessing — always call see first. "
+                "If the question is not about what is visible right now (e.g. time, music, menu), do NOT call see."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "question": {
                         "type": "string",
-                        "description": "The specific visual question to answer, e.g. 'Does the person look happy?', 'What is the person wearing?', 'Who is in the room?'",
+                        "description": "The exact visual question to answer from the photo, in the user's language. E.g. 'Does the person look tired?', 'Who is in the room?', 'What is the person wearing?'",
                     }
                 },
                 "required": ["question"],
@@ -502,9 +505,9 @@ class Brain:
                 _lh = {"fi": "suomea", "en": "englantia", "sv": "ruotsia", "de": "saksaa", "es": "espanjaa", "fr": "ranskaa"}
                 ld = _lh.get(language, language)
                 if language == "en":
-                    lang_rule = "CRITICAL: The user spoke English. Reply ONLY in English. Never switch to Finnish."
+                    lang_rule = "CRITICAL: The user is speaking English. Reply in natural, fluent English. Do not switch to Finnish or mix languages. Match their tone (casual/formal)."
                 else:
-                    lang_rule = f"KRIITTINEN: Käyttäjä puhui {ld}. Vastaa VAIN samalla kielellä."
+                    lang_rule = f"KRIITTINEN: Käyttäjä puhuu {ld}. Vastaa luonnollisella kielellä. Älä vaihda toiselle kielelle tai sekoita kieliä."
                 self._history.append({"role": "system", "content": lang_rule})
             self._history.append({"role": "user", "content": user_text})
             return self._history
@@ -515,9 +518,9 @@ class Brain:
             _lh = {"fi": "suomea", "en": "englantia", "sv": "ruotsia", "de": "saksaa", "es": "espanjaa", "fr": "ranskaa"}
             ld = _lh.get(language, language)
             if language == "en":
-                lang_rule = "CRITICAL: The user spoke English. Reply ONLY in English. Never switch to Finnish."
+                lang_rule = "CRITICAL: The user is speaking English. Reply in natural, fluent English. Do not switch to Finnish or mix languages. Match their tone (casual/formal)."
             else:
-                lang_rule = f"KRIITTINEN: Käyttäjä puhui {ld}. Vastaa VAIN samalla kielellä."
+                lang_rule = f"KRIITTINEN: Käyttäjä puhuu {ld}. Vastaa luonnollisella kielellä. Älä vaihda toiselle kielelle tai sekoita kieliä."
             messages.append({"role": "system", "content": lang_rule})
         messages.append({"role": "system", "content": SYSTEM_PROMPT})
         if self._startup_context:
@@ -560,12 +563,25 @@ class Brain:
                 "role": "system",
                 "content": (
                     "Yhdistä vastauksesi keskusteluun: viittaa edellisiin viesteihin ('se', 'tuo', 'sama'). "
+                    "Muista viimeisimmät vaihtiot ja aihe; pysy samalla kielellä kuin käyttäjä on käyttänyt. "
                     "Kun kontekstissa ei ole vastausta, käytä lookup_knowledge-työkalua. "
                     "Vastaa aina kontekstin perusteella."
                 ),
             }
         )
-        messages.extend(self._store.get_session_messages(session_id, limit=10))
+        if language:
+            _lang_label = "englanti" if language == "en" else {"fi": "suomi", "sv": "ruotsi"}.get(language, language)
+            messages.append(
+                {
+                    "role": "system",
+                    "content": (
+                        "Istunnon kieli: englanti. Vastaa englanniksi."
+                        if language == "en"
+                        else f"Istunnon kieli: {_lang_label}. Vastaa samalla kielellä."
+                    ),
+                }
+            )
+        messages.extend(self._store.get_session_messages(session_id, limit=16))
         return messages
 
     def _reset_history(self) -> None:

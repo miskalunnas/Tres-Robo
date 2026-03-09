@@ -6,6 +6,10 @@ No camera activity happens during normal turns.
 
 import base64
 import sys
+from pathlib import Path
+
+_DEBUG_DIR = Path(__file__).resolve().parent.parent / "vision_debug"
+_DEBUG_IMAGE = _DEBUG_DIR / "vision_debug.jpg"
 
 
 def capture_and_describe(question: str, client) -> str:
@@ -26,9 +30,10 @@ def capture_and_describe(question: str, client) -> str:
         print(f"[Vision] Camera capture error: {exc}", file=sys.stderr)
         return "En saanut kuvaa kamerasta."
 
-    # Always save last frame for debugging — inspect at /tmp/vision_debug.jpg
-    cv2.imwrite("/tmp/vision_debug.jpg", frame)
-    print(f"[Vision] Debug frame saved to /tmp/vision_debug.jpg (shape={frame.shape})")
+    # Always save last frame for debugging — inspect at vision_debug/vision_debug.jpg
+    _DEBUG_DIR.mkdir(parents=True, exist_ok=True)
+    cv2.imwrite(str(_DEBUG_IMAGE), frame)
+    print(f"[Vision] Debug frame saved to {_DEBUG_IMAGE} (shape={frame.shape})")
 
     # Face recognition — runs in-memory, fast, gracefully skipped if not installed.
     names: list[str] = []
