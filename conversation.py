@@ -90,6 +90,13 @@ SESSION_END_PATTERNS = (
     re.compile(
         r"\b(?:mene lepotilaan|siirry lepotilaan|mene nukkumaan|voit mennä nukkumaan|voit mennä lepotilaan)\b"
     ),
+    # Lepotila: "ole hiljaa", "älä puhu" jne.
+    re.compile(
+        r"\b(?:ole nyt hiljaa|ole hiljaa|älä puhu|voit olla hiljaa|ei tarvitse vastata|pysy hiljaa)\b"
+    ),
+    re.compile(
+        r"\b(?:be quiet now|stay quiet|don't talk|shut up now|no need to respond|just be quiet)\b"
+    ),
     re.compile(
         r"\b(?:that's all(?: for now)?|that is all(?: for now)?|that's everything|that is everything|we(?: are|'re) done|i(?: am|'m) done(?: for now)?|done for now|nothing else|no more questions|all good now)\b"
     ),
@@ -195,6 +202,18 @@ class ConversationEngine:
             matched_interrupt = next((word for word in INTERRUPT_WORDS if word in normalized), None)
             matched_session_end = self._is_session_end_intent(text)
             local_command = parse_command(text)
+            # Lyhyet segmentit: 1–3 sanaa ilman wake/interrupt/session_end/komento → taustamelu, hylätään
+            words = re.findall(r"\w+", normalized)
+            if (
+                not matched_wake_word
+                and not matched_interrupt
+                and not matched_session_end
+                and local_command is None
+                and len(words) <= 3
+            ):
+                preview = (text[:40] + "...") if len(text) > 40 else text
+                print(f"[Interrupt ignored] Short (no wake/command): {preview}")
+                return False
             clear_interrupt = self._looks_like_clear_interrupt(text)
             if matched_session_end:
                 print(f"[Interrupt heard] {text}")
@@ -624,24 +643,34 @@ class ConversationEngine:
 
     def _looks_like_clear_interrupt(self, text: str) -> bool:
         """True vain jos puhe on selkeästi suunnattu botille (ei taustakeskustelu tai taustamelu).
-        Suodattaa: taustamelu, lyhyet äänähdykset, ihmiset jotka puhuvat toisilleen."""
+        Kaksitasoinen: vahva adressointi → alhaisempi kynnys; heikko → korkeampi."""
         normalized = text.lower().strip()
         if not normalized:
             return False
 
         words = re.findall(r"\w+", normalized)
-        # 1. Pituus: ei taustamelua, ei lyhyitä äänähdyksiä
-        if len(words) < 8 or len(normalized) < 40:
+        addressing_count = sum(
+            1 for kw in ADDRESSING_KEYWORDS
+            if re.search(rf"\b{re.escape(kw)}\b", normalized)
+        )
+        has_wake = any(w in normalized for w in WAKE_WORDS)
+
+        # Vahva adressointi: herätyssana tai 2+ adressointisanaa → keskeytys helpommin
+        if has_wake or addressing_count >= 2:
+            if len(words) >= 6 and len(normalized) >= 30:
+                pass  # fall through to echo check
+            else:
+                return False
+        # Heikko adressointi: 1 sana → korkeampi kynnys (taustakeskustelu ei keskeytä)
+        elif addressing_count >= 1:
+            if len(words) >= 10 and len(normalized) >= 50:
+                pass
+            else:
+                return False
+        else:
             return False
 
-        # 2. Adressointi: puheen pitää viitata botiin tai komentoihin — ei "mitä sanoit kokouksesta"
-        if not any(
-            re.search(rf"\b{re.escape(kw)}\b", normalized)
-            for kw in ADDRESSING_KEYWORDS
-        ):
-            return False
-
-        # 3. Ei kaiku: hylätään jos teksti muistuttaa botin omaa puhetta
+        # Ei kaiku: hylätään jos teksti muistuttaa botin omaa puhetta
         for ref_text in (self._active_reply_text, self._last_spoken_text):
             ref_words = set(re.findall(r"\w+", (ref_text or "").lower()))
             if ref_words:

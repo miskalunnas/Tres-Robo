@@ -13,7 +13,8 @@ try:
 except Exception:  # noqa: BLE001
     nr = None
 
-from conversation import ConversationEngine
+from conversation import ConversationEngine, WAKE_WORDS
+from Tools.commands import parse_command
 from voice.tts import is_busy
 
 # Puheen tunnistus: True = OpenAI Whisper API (pilvi), False = paikallinen faster-whisper.
@@ -39,7 +40,7 @@ MAX_SEGMENT_SECONDS = 8.0
 # OFFLINE: herätys sujuvampi — lyhyet "hei bot" pääsevät läpi.
 MIN_SEGMENT_WHEN_OFFLINE = 0.35
 # ONLINE + musiikki: korkeampi kynnys = botti ei keskeytä musiikkia lyhyellä puheella.
-MIN_SEGMENT_WHEN_MUSIC_PLAYING = 1.2
+MIN_SEGMENT_WHEN_MUSIC_PLAYING = 1.5
 # Hiljaisuus ennen kuin lähetetään Whisperille: isompi = botti ei puhu päälle, pienempi = nopeampi vastaus.
 MAX_SILENCE_BETWEEN_SPEECH_SECONDS = 0.9
 
@@ -217,6 +218,28 @@ def _transcription_worker(model, native_sr: int) -> None:
             segment_queue.task_done()
 
 
+def _should_accept_while_music_playing(text: str) -> bool:
+    """True if segment should be processed when music is playing (wake word or music command)."""
+    import re
+    if not text or not text.strip():
+        return False
+    normalized = text.lower().strip()
+    normalized = re.sub(r"[,.!?:;]+", " ", normalized)
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    for w in WAKE_WORDS:
+        if w in normalized:
+            return True
+    cmd = parse_command(text)
+    if cmd:
+        action = cmd.get("action", "")
+        if action in (
+            "music_play", "music_skip", "music_pause", "music_resume", "music_stop",
+            "music_queue", "volume_up", "volume_down",
+        ):
+            return True
+    return False
+
+
 def _dialogue_worker(engine: ConversationEngine) -> None:
     while True:
         utterance = utterance_queue.get()
@@ -228,6 +251,16 @@ def _dialogue_worker(engine: ConversationEngine) -> None:
                     language=utterance.language,
                 )
             else:
+                # Musiikki soi + ONLINE: aktivoitu vain herätyssanalla tai musiikkikomennolla
+                try:
+                    from Tools.music import is_playing
+                    if is_playing() and engine.is_online():
+                        if not _should_accept_while_music_playing(utterance.text):
+                            preview = (utterance.text[:50] + "...") if len(utterance.text) > 50 else utterance.text
+                            print(f"[Music listening] Ignored (no wake/command): {preview}")
+                            continue
+                except Exception:
+                    pass
                 engine.handle(
                     utterance.text,
                     now=utterance.heard_at,
