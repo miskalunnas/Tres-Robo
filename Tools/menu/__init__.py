@@ -182,6 +182,31 @@ def _format_meal_lines(rest: dict, *, include_restaurant_name: bool) -> list[str
     return lines
 
 
+def _format_restaurant_compact(rest: dict) -> str:
+    """One line: dish names only, comma-separated. For quick spoken summary."""
+    if not rest.get("open_today", False):
+        return "closed"
+    names: list[str] = []
+    for meal in rest.get("meals", []):
+        for item in meal.get("mo", []):
+            name = (item.get("mpn") or "").strip()
+            if name:
+                names.append(name)
+    return ", ".join(names) if names else "ei listaa"
+
+
+def _parse_restaurant_compact(data: dict, key: str) -> list[tuple[str, str]]:
+    """(display_name, one_line_summary) per restaurant part. For quick output."""
+    matches = _find_restaurant_entries(data, key)
+    if not matches:
+        return []
+    result: list[tuple[str, str]] = []
+    for rest in matches:
+        name = (rest.get("restaurant") or RESTAURANT_DISPLAY.get(key, key)).strip()
+        result.append((name, _format_restaurant_compact(rest)))
+    return result
+
+
 def _parse_restaurant(data: dict, key: str) -> list[str]:
     """Extract formatted menu lines for a canonical restaurant key."""
     matches = _find_restaurant_entries(data, key)
@@ -234,8 +259,20 @@ def get_menu(restaurant: str) -> str:
 
     today = date.today()
     spoken = _spoken_date(today)
-    header = f"Päivämäärä: {spoken}.\n{display} — {today.strftime('%d.%m.%Y')}:"
-    return header + "\n" + "\n".join(lines)
+    # Tiivis: yksi rivi, vain ruokalajit
+    compact = _parse_restaurant_compact(data, key)
+    if compact:
+        all_dishes = [s for _, s in compact if s and s not in ("closed", "ei listaa")]
+        if all_dishes:
+            body = "; ".join(all_dishes)
+        elif any(s == "closed" for _, s in compact):
+            body = "kiinni tänään"
+        else:
+            body = "ei listaa"
+    else:
+        body = "ei listaa"
+    header = f"Päivämäärä: {spoken}.\n{display}:"
+    return f"{header}\n{body}"
 
 
 def get_all_menus() -> str:
@@ -256,16 +293,24 @@ def get_all_menus() -> str:
     parts: list[str] = []
     today = date.today()
     spoken = _spoken_date(today)
-    header = f"Päivämäärä: {spoken}.\nLunch menus — {today.strftime('%d.%m.%Y')}"
+    # Tiivis: yksi rivi per ravintola, vain ruokalajit
     for key in RESTAURANT_DISPLAY:
         display = RESTAURANT_DISPLAY[key]
-        lines = _parse_restaurant(data, key)
-        if lines:
-            parts.append(f"{display}:\n" + "\n".join(lines))
+        compact = _parse_restaurant_compact(data, key)
+        if compact:
+            # Yhdistä kaikki saman paikan ruoat yhdeksi riviksi
+            all_dishes = []
+            for _place, summary in compact:
+                if summary and summary != "closed" and summary != "ei listaa":
+                    all_dishes.append(summary)
+            if all_dishes:
+                parts.append(f"{display}: " + "; ".join(all_dishes))
+            else:
+                parts.append(f"{display}: closed tai ei listaa")
         else:
-            parts.append(f"{display}: No menu available.")
-
-    return header + "\n\n" + "\n\n".join(parts)
+            parts.append(f"{display}: ei listaa")
+    header = f"Päivämäärä: {spoken}."
+    return header + "\n\n" + "\n".join(parts)
 
 
 def list_restaurants() -> list[str]:

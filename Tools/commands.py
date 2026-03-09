@@ -16,66 +16,78 @@ Priority order:
 # Prefix keywords: the rest of the text after the keyword is the query.
 # Longer prefixes first. Vain selkeät musiikkikomennot — ei "play" tai "laitetaan" yksin.
 PLAY_PREFIXES = (
-    "put on some", "put on", "soita jotain", "soita musiikki", "soita",
-    "soittakaa", "laita soimaan", "laitetaan jotain", "laitetaan",
-    "taustamusiikkia", "taustamusiikki",
-    "play music", "play a song", "play song", "play some", "play me",
-    "i want to hear", "i want to listen to", "i wanna hear",
-    "let's listen to", "lets listen to",
-    "can you play", "could you play",
+    "put on some", "put on", "put some music on", "throw on some", "throw on",
+    "soita jotain", "soita musiikki", "soita", "soittakaa", "soittaisitko",
+    "voisitko soittaa", "voisit soittaa", "voisko soittaa", "voisitko laittaa",
+    "laita soimaan", "laitetaan jotain", "laitetaan", "pistä soimaan", "pistä soiton",
+    "taustamusiikkia", "taustamusiikki", "taustalle", "jotain taustalle",
+    "jotain musiikkia", "musiikkia", "vähän musiikkia", "vahan musiikkia",
+    "play music", "play a song", "play song", "play some", "play me", "play a bit of",
+    "play something", "play anything", "start some music", "start the music",
+    "i want to hear", "i want to listen to", "i wanna hear", "i wanna listen",
+    "let's listen to", "lets listen to", "can we listen to", "can you put on",
+    "can you play", "could you play", "could you put on", "would you play",
+    "hit play", "turn on some music", "turn on the music",
 )
 # Ei pelkkä "play" tai "queue" — liian herkkä.
 QUEUE_PREFIXES = (
-    "add to queue", "add to the queue", "lisää jonoon", "lisää listaan",
-    "laita jonoon", "laita seuraavaksi", "seuraavaksi soita",
-    "queue up", "put in queue", "put in the queue",
-    "enqueue",
+    "add to queue", "add to the queue", "add this to queue", "add that to queue",
+    "lisää jonoon", "lisää listaan", "lisää tämä jonoon", "laita jonoon",
+    "laita seuraavaksi", "seuraavaksi soita", "seuraavaksi tämä", "soita tämä seuraavaksi",
+    "queue up", "queue this", "put in queue", "put in the queue", "put this in queue",
+    "enqueue", "add next", "play that next", "next up", "after this play",
 )
 # Täytesanat: jos query on vain näitä, älä soita (ei "laitetaan vaikka" tms.)
 PLAY_QUERY_BLOCKLIST = frozenset({"vaikka", "sitten", "nyt", "vähän", "vahan", "ehkä", "ehka"})
 
 # Simple keywords (no query).
 SKIP_KEYWORDS = (
-    "next song", "next track", "skip this song", "skip this track",
-    "skip song", "skip track", "skip this", "skip it",
-    "play next", "go to next", "move to next",
+    "next song", "next track", "next one", "next tune", "another song", "different song",
+    "skip this song", "skip this track", "skip this", "skip it", "skip to next",
+    "skip song", "skip track", "change song", "change the song", "switch song",
+    "play next", "go to next", "move to next", "on to the next",
     "seuraava kappale", "seuraava biisi", "seuraava", "seuraavaksi",
+    "vaihda biisi", "vaihda kappale", "toinen biisi", "toinen kappale", "uusi biisi",
+    "ei tätä", "not this one", "not this song",
     "skip", "next",
 )
 PAUSE_KEYWORDS = (
     "pause music", "pause the music", "pause song", "pause the song",
-    "pause playback", "hold the music", "tauko", "pauseta", "pausetta",
+    "pause playback", "hold the music", "hold on", "freeze the music",
+    "tauko", "pauseta", "pausetta", "pysäytä", "pysäytä musiikki", "pidä tauko",
     "pause",
 )
 RESUME_KEYWORDS = (
     "resume music", "resume the music", "resume song", "resume playback",
-    "continue playing", "continue the music", "keep playing",
-    "unpause", "un-pause", "jatka", "jatka musiikki", "jatka soitto",
+    "continue playing", "continue the music", "keep playing", "continue",
+    "unpause", "un-pause", "play again", "start again", "start playing again",
+    "jatka", "jatka musiikki", "jatka soitto", "jatka soittaminen",
+    "alkaa soittaa", "soita taas", "soita uudestaan",
     "resume",
 )
 STOP_KEYWORDS = (
     "stop music", "stop the music", "stop playing", "stop the song",
-    "stop playback", "turn off music", "turn off the music",
-    "kill the music", "cut the music", "silence",
+    "stop playback", "turn off music", "turn off the music", "switch off music",
+    "kill the music", "cut the music", "silence", "sammuta musiikki",
     "stop it", "stop that", "no more music", "music off", "that's enough",
     "enough music", "shut off the music", "turn off the song",
-    "lopeta", "lopeta musiikki", "lopeta soitto", "musiikki pois",
-    "lopeta se", "lopeta tuo", "ei enää musiikkia",
-    "poista kaikki", "poista kaikki musiikki", "tyhjennä jono",
+    "lopeta", "lopeta musiikki", "lopeta soitto", "lopeta se", "lopeta tuo",
+    "ei enää musiikkia", "ei musiikkia", "musiikki pois",
+    "poista kaikki", "poista kaikki musiikki", "tyhjennä jono", "tyhjennä lista",
     "clear", "clear all", "clear queue", "clear the queue",
     "stop",
 )
 VOLUME_UP_KEYWORDS = (
     "turn it up", "volume up", "volume upp", "louder", "raise volume",
-    "increase volume", "crank it up", "pump it up",
-    "turn up the volume", "make it louder",
+    "increase volume", "crank it up", "pump it up", "boost volume",
+    "turn up the volume", "make it louder", "a bit louder", "little louder",
     "äänenvoimakkuus ylös", "ääntä ylös", "ääni ylös", "kovemmalle", "kovempaa",
     "kovemmaksi", "ääni kovemmaksi", "ääntä kovemmaksi",
 )
 VOLUME_DOWN_KEYWORDS = (
-    "turn it down", "volume down", "quieter", "lower volume",
+    "turn it down", "volume down", "quieter", "lower volume", "softer",
     "decrease volume", "turn down the volume", "make it quieter",
-    "not so loud", "too loud",
+    "not so loud", "too loud", "a bit quieter", "little quieter",
     "äänenvoimakkuus alas", "ääntä alas", "ääni alas", "hiljemmalle", "hiljempaa",
     "hiljemmaksi", "ääni hiljemmaksi", "ääntä hiljemmaksi",
 )
