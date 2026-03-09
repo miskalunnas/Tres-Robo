@@ -80,7 +80,12 @@ def transcribe(
     response = client.audio.transcriptions.create(**kwargs)
     text = (response.text or "").strip()
     if return_language:
-        lang_name = (getattr(response, "language", None) or "finnish").lower()
-        lang_code = _LANG_NAME_TO_CODE.get(lang_name, "") if lang_name else ""
+        raw = getattr(response, "language", None) or ""
+        lang_name = (raw or "").strip().lower()
+        if not lang_name:
+            return text, ""  # Let conversation layer infer from text; don't assume Finnish
+        if len(lang_name) == 2:
+            return text, lang_name  # Already ISO 639-1 (e.g. "en", "fi")
+        lang_code = _LANG_NAME_TO_CODE.get(lang_name, "")
         return text, lang_code
     return text

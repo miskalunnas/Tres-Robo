@@ -180,6 +180,7 @@ class MusicPlayer:
                 ]
 
         kwargs: dict = {
+            "stdin": subprocess.PIPE,
             "stdout": subprocess.DEVNULL,
             "stderr": subprocess.DEVNULL,
         }
@@ -468,9 +469,25 @@ class MusicPlayer:
             except OSError:
                 pass
 
+        # Graceful quit: ffplay/mpv both exit on 'q'
         try:
-            proc.terminate()
-            proc.wait(timeout=3)
+            if proc.stdin and proc.poll() is None:
+                proc.stdin.write(b"q")
+                proc.stdin.flush()
+                time.sleep(0.5)
+        except Exception:
+            pass
+
+        try:
+            if proc.poll() is None:
+                proc.terminate()
+                proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            try:
+                proc.kill()
+                proc.wait(timeout=2)
+            except Exception:
+                pass
         except Exception:
             try:
                 proc.kill()

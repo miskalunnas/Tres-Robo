@@ -9,3 +9,4 @@ python-dotenv
 openai
 elevenlabs
 requests
+setuptools

@@ -12,6 +12,36 @@ import threading
 import time
 
 from brain import Brain
+
+# Fallback: tunnista kieli tekstistä kun Whisper ei palauta
+_ENGLISH_WORDS = frozenset(
+    "the a an is are was were be been being have has had do does did will would could should may might must shall can need what when where who which why how play stop skip pause resume time joke menu lunch volume hello hi hey yeah yes no ok okay cool thanks tell me about".split()
+)
+# Lyhyet englanninkieliset fraasit (esim. "hey bot", "play something")
+_ENGLISH_PHRASE_PATTERNS = (
+    re.compile(r"\b(?:hey|hi|hello|yo)\s+(?:bot|founder)\b", re.I),
+    re.compile(r"\b(?:play|skip|pause|resume|stop)\s+\w*\b", re.I),
+    re.compile(r"\b(?:what|how|when|where|why)\s+\w+\b", re.I),
+    re.compile(r"\b(?:tell me|give me|show me)\b", re.I),
+    re.compile(r"\b(?:i (?:am|want|need|like))\b", re.I),
+)
+
+
+def _infer_language_from_text(text: str) -> str:
+    """Yksinkertainen arvio: jos teksti sisältää en-tyyppisiä sanoja eikä ä/ö, → en."""
+    if not text or len(text) < 2:
+        return ""
+    t = text.lower().strip()
+    has_finnish_chars = "ä" in t or "ö" in t
+    words = set(re.findall(r"\b[a-zäö]+\b", t))
+    english_count = len(words & _ENGLISH_WORDS)
+    if has_finnish_chars:
+        return "fi"
+    if english_count >= 2 or (english_count >= 1 and len(words) <= 4):
+        return "en"
+    if any(p.search(t) for p in _ENGLISH_PHRASE_PATTERNS):
+        return "en"
+    return ""
 from memory import MemoryStore
 from Tools import handle_speech as handle_tool_speech
 from Tools.commands import parse_command
@@ -110,6 +140,7 @@ class ConversationEngine:
         self._reply_generation = 0
         self._active_reply_text = ""
         self._last_spoken_text = ""
+        self._session_language: str = ""  # viimeisin tunnistettu kieli
 
     # ------------------------------------------------------------------
     def handle(self, text: str, now: float, *, language: str = "") -> None:
@@ -185,6 +216,14 @@ class ConversationEngine:
             print(f"[Interrupt heard] {text}")
             self._cancel_active_reply_locked()
             interrupt_speech()
+
+            # "stop" / "stop the music" jne. — suoritetaan music_stop aina kun kyseessä
+            if local_command and local_command.get("action") == "music_stop":
+                tool_result = handle_tool_speech(text, language=language)
+                if tool_result.handled and tool_result.response:
+                    self._speak_reply(tool_result.response)
+                self._last_activity = now
+                return True
 
             if not remainder:
                 self._last_activity = now
@@ -265,6 +304,7 @@ class ConversationEngine:
             )
         self._online = False
         self._session_id = None
+        self._session_language = ""
         self._brain.reset()
         print("[Engine] OFFLINE. Say 'founderbot', 'hei bot' or 'kuule bot' to wake me up.")
 
@@ -277,11 +317,21 @@ class ConversationEngine:
         interrupted: bool = False,
     ) -> None:
         self._last_activity = now
+        # Kieli: Whisper → session muisti → tekstipohjainen arvio
+        if language:
+            self._session_language = language
+        elif not self._session_language:
+            inferred = _infer_language_from_text(text)
+            if inferred:
+                self._session_language = inferred
+                language = inferred
+        else:
+            language = self._session_language
         # Hylätään kaiku: botti kuulee omansa mikistä
         refs = [r for r in (self._active_reply_text, self._last_spoken_text) if r and r.strip()]
         if refs and any(self._text_looks_like_echo(text, ref) for ref in refs):
             return
-        print(f"[Online heard] {text}")
+        print(f"[Online heard] {text} [lang={language or '?'}]")
         print(f"You said: {text}")
         self._log_user_message(text)
 

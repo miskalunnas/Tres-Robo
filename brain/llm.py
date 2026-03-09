@@ -501,11 +501,25 @@ class Brain:
             if language:
                 _lh = {"fi": "suomea", "en": "englantia", "sv": "ruotsia", "de": "saksaa", "es": "espanjaa", "fr": "ranskaa"}
                 ld = _lh.get(language, language)
-                self._history.append({"role": "system", "content": f"Käyttäjä puhui {ld}. Vastaa samalla kielellä."})
+                if language == "en":
+                    lang_rule = "CRITICAL: The user spoke English. Reply ONLY in English. Never switch to Finnish."
+                else:
+                    lang_rule = f"KRIITTINEN: Käyttäjä puhui {ld}. Vastaa VAIN samalla kielellä."
+                self._history.append({"role": "system", "content": lang_rule})
             self._history.append({"role": "user", "content": user_text})
             return self._history
 
-        messages: list[dict] = [{"role": "system", "content": SYSTEM_PROMPT}]
+        # KIELI ENAKKOON — botti vastaa aina käyttäjän kielellä
+        messages: list[dict] = []
+        if language:
+            _lh = {"fi": "suomea", "en": "englantia", "sv": "ruotsia", "de": "saksaa", "es": "espanjaa", "fr": "ranskaa"}
+            ld = _lh.get(language, language)
+            if language == "en":
+                lang_rule = "CRITICAL: The user spoke English. Reply ONLY in English. Never switch to Finnish."
+            else:
+                lang_rule = f"KRIITTINEN: Käyttäjä puhui {ld}. Vastaa VAIN samalla kielellä."
+            messages.append({"role": "system", "content": lang_rule})
+        messages.append({"role": "system", "content": SYSTEM_PROMPT})
         if self._startup_context:
             messages.append({"role": "system", "content": f"Aloituskuva (kamera sessioalussa): {self._startup_context}"})
         prev_summary = self._store.get_previous_session_summary(
@@ -533,16 +547,8 @@ class Brain:
                     "content": f"Konteksti (muisti + tietopohja):\n{context_text}",
                 }
             )
-        # Kieli ja keskeytys: botti neutraali, vastaa aina käyttäjän kielellä
+        # Keskeytys
         hints: list[str] = []
-        if language:
-            _lang_hints = {"fi": "suomea", "en": "englantia", "sv": "ruotsia", "de": "saksaa", "es": "espanjaa", "fr": "ranskaa"}
-            lang_desc = _lang_hints.get(language, language)
-            if language == "en":
-                # Finnish persona tends to ignore Finnish-language instructions — add English enforcement too.
-                hints.append("The user spoke English. You MUST reply in English only. Do not switch to Finnish under any circumstances.")
-            else:
-                hints.append(f"Käyttäjä puhui {lang_desc}. Vastaa AINA samalla kielellä — älä vaihda kieleen jota käyttäjä ei puhunut.")
         if interrupted:
             hints.append("Käyttäjä keskeytti sinut juuri. Vastaa lyhyesti ja ota se huomioon.")
         if hints:

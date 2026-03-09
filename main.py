@@ -57,19 +57,15 @@ USE_DENOISER = True
 
 # Whisper model: "tiny" = nopein, "base" = nopea kompromissi, "small"/"medium" = tarkempi suomeen.
 WHISPER_MODEL = "small"
-# Whisper: herätyssanat ensin (tärkein kauempaa puhuttaessa). Fraasit auttavat tunnistusta.
+# Whisper: herätyssanat ensin. FI + EN fraasit tasapainottavat kielitunnistusta (älä biasoi suomeen).
 WHISPER_PROMPT = (
-    "Founderbot, founderbott, founder bot, found a bot, founder bott, founderbotti. "
-    "Hei botti, hei bot, hei robot, hei robotti. Kuule botti, kuule bot, bot kuule, botti kuule. "
-    "Terve botti, terve bot, moro botti, moro bot, moi botti, moi bot. Ok bot, okay bot, yo bot. "
-    "Soita, soita musiikki, laita soimaan, laitetaan, taustamusiikkia, play, skip, seuraava, vaihda biisi, tauko, pause, jatka, resume, lopeta, stop, queue, lisää jonoon, poista kaikki, tyhjennä jono, clear. "
-    "Volume, volume up, volume down, louder, quieter, kovempaa, hiljempaa, ääni ylös, ääni alas. "
-    "Kello, mitä kello on, paljonko kello, aika, time. Vitsi, kerro vitsi, joke. "
-    "Ruokalista, lounaslista, mitä ruokana, reaktori, newton, menu, lunch. "
-    "Moi, hei, moro, terve, moikka, päivää, kiitos, joo, ei, kyllä, selvä. "
-    "Miten voit, pöhinä, pöhinää, voisitko, kerro, mitä, miksi, milloin, missä, mikä, kuka, apua, mitä osaat. "
-    "Näkemiin, hei hei, moi moi, goodbye, bye, siinä kaikki, ei muuta, palataan myöhemmin, mene lepotilaan. "
-    "Lopetetaan, lopetetaan puhuminen, kiitos hei, kiitos moi, selvä kiitos, okei kiitos, se siinä."
+    "Founderbot, founder bot, hei bot, hey bot, hi bot, kuule bot, listen bot. "
+    "Play, skip, pause, resume, stop, queue, volume up, volume down. "
+    "Soita, tauko, jatka, lopeta, seuraava, kovempaa, hiljempaa. "
+    "What time, tell me a joke, lunch menu, what's for lunch. "
+    "Kello, vitsi, ruokalista, lounas, reaktori, newton. "
+    "Hello, hi, hey, thanks, bye, goodbye. Moi, hei, moro, kiitos, näkemiin. "
+    "Lopetetaan, kiitos hei, selvä kiitos. That's all, see you later, going offline."
 )
 
 
