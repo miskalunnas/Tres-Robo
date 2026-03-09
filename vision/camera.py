@@ -1,9 +1,24 @@
-"""Camera abstraction — tries picamera2 (Pi Camera Module) first, falls back to OpenCV."""
+"""Camera for Tres-Robo: Raspberry Pi Camera Module 2 via picamera2.
+
+Primary setup: Raspberry Pi + Camera Module 2 (CSI). Uses libcamera/picamera2.
+OpenCV USB webcam is only a development fallback when picamera2 is not available
+(e.g. running on Windows/Mac). On the Pi, install: sudo apt install -y python3-picamera2
+and enable the camera (raspi-config → Interface Options → Camera).
+"""
+import os
 import sys
 import time
 from types import TracebackType
 
 import numpy as np
+
+
+def _opencv_camera_index() -> int:
+    """Camera index for OpenCV: 0 by default, overridable via CV2_CAMERA_INDEX."""
+    try:
+        return int(os.environ.get("CV2_CAMERA_INDEX", "0"))
+    except ValueError:
+        return 0
 
 
 class Camera:
@@ -53,26 +68,40 @@ class Camera:
             time.sleep(self._warmup)
             self._cam = cam
             self._backend = "picamera2"
-            print("[Camera] Using picamera2 (Pi Camera Module)")
+            print("[Camera] Using Raspberry Pi Camera Module 2 (picamera2)")
         except ImportError:
-            print("[Camera] picamera2 not installed — falling back to OpenCV USB webcam.", file=sys.stderr)
+            print(
+                "[Camera] picamera2 not installed — Pi Camera Module 2 is the intended camera. "
+                "On Raspberry Pi: sudo apt install -y python3-picamera2. "
+                "Falling back to USB webcam (dev only).",
+                file=sys.stderr,
+            )
             self._open_opencv()
         except Exception as exc:
-            print(f"[Camera] picamera2 failed ({exc}) — falling back to OpenCV USB webcam.", file=sys.stderr)
+            print(
+                f"[Camera] picamera2 failed ({exc}). "
+                "Intended hardware: Raspberry Pi + Camera Module 2. Falling back to USB webcam (dev only).",
+                file=sys.stderr,
+            )
             self._open_opencv()
 
     def _open_opencv(self) -> None:
         import cv2  # type: ignore[import]
 
-        cap = cv2.VideoCapture(0)
+        index = _opencv_camera_index()
+        cap = cv2.VideoCapture(index)
         if not cap.isOpened():
             raise RuntimeError(
-                "No camera found. Install picamera2 or connect a USB webcam."
+                f"No camera found at index {index}. "
+                "Try CV2_CAMERA_INDEX=1 in .env, or connect a USB webcam."
             )
         time.sleep(self._warmup)
+        # Discard first frames — many USB webcams return invalid/black frames until warmed up.
+        for _ in range(5):
+            cap.read()
         self._cap = cap
         self._backend = "opencv"
-        print("[Camera] Using OpenCV (USB/webcam fallback)")
+        print(f"[Camera] Using OpenCV USB webcam (dev fallback only; intended: Pi Camera Module 2, index={index})")
 
     def _close(self) -> None:
         if self._cam is not None:
@@ -100,6 +129,12 @@ class Camera:
 
     def _capture_opencv(self) -> np.ndarray:
         ret, frame = self._cap.read()
-        if not ret:
-            raise RuntimeError("Failed to read frame from camera.")
-        return frame
+        if ret and frame is not None and frame.size > 0:
+            return frame
+        # First read often fails on USB cams; retry a few times.
+        for attempt in range(4):
+            time.sleep(0.1)
+            ret, frame = self._cap.read()
+            if ret and frame is not None and frame.size > 0:
+                return frame
+        raise RuntimeError("Failed to read frame from camera. Try another app closing the camera, or set CV2_CAMERA_INDEX=1 in .env.")
