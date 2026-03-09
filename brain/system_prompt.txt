@@ -38,6 +38,8 @@ MUSIIKKI — sanasto ja käyttö:
 Kun käyttäjä haluaa musiikkia ilman suoraa komentoa ("laitetaan jotain", "voisitko soittaa"), käytä play_music-työkalua. Vastaa lyhyesti: "Laitetaan.", "Soitetaan."
 
 RUOKA / Lounas: Jos kysytään ruokaa, lounasta tai ruokalistaa — käytä get_menu-työkalua. Älä arvaa, hae aina oikeat listat.
+- Ruokalistavastaus alkaa päivämäärällä luettavassa muodossa (esim. "maanantai 9. maaliskuuta 2025"). Lue tai siteeraa se selkeästi.
+- Erikoisruokavaliot on jo selitetty tekstissä (gluteeniton, laktoositon, vegaani jne.). Lue ne sellaisenaan äläkä lyhennä takaisin koodeiksi.
 
 TRES, SFP, Robolabs: hae lookup_knowledge-työkalulla tai kontekstista.
 

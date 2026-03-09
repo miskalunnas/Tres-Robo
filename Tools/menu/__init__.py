@@ -8,6 +8,33 @@ import requests
 UNISAFKA_BASE = "https://unisafka.fi/static/json"
 CAMPUS = "tty"
 
+# Erikoisruokavalioiden lyhenteet → selitetty muoto (botti ja TTS lukevat sujuvasti)
+DIET_CODES: dict[str, str] = {
+    "g": "gluteeniton",
+    "l": "laktoositon",
+    "vl": "vähälaktoosinen",
+    "vg": "vegaani",
+    "v": "vege",
+    "m": "maidoton",
+    "s": "soijaton",
+    "sml": "sianliha",
+    "k": "kananmuna",
+}
+
+# Päivämäärän puhemuoto (ääntäminen) — kuukaudet genetiivissä
+MONTHS_FI = (
+    "tammikuuta", "helmikuuta", "maaliskuuta", "huhtikuuta", "toukokuuta", "kesäkuuta",
+    "heinäkuuta", "elokuuta", "syyskuuta", "lokakuuta", "marraskuuta", "joulukuuta",
+)
+WEEKDAYS_FI = ("maanantai", "tiistai", "keskiviikko", "torstai", "perjantai", "lauantai", "sunnuntai")
+
+
+def _spoken_date(d: date) -> str:
+    """Päivämäärä luettavassa muodossa: maanantai 9. maaliskuuta 2025."""
+    wd = WEEKDAYS_FI[d.weekday()]
+    mo = MONTHS_FI[d.month - 1]
+    return f"{wd} {d.day}. {mo} {d.year}"
+
 RESTAURANT_KEYS: dict[str, tuple[str, ...]] = {
     "reaktori": ("res_reaktori", "res_reaktori_iltaruoka"),
     "newton": ("res_newton",),
@@ -40,6 +67,15 @@ RESTAURANT_NAME_HINTS: dict[str, tuple[str, ...]] = {
 }
 
 _DAYS_FI = ("ma", "ti", "ke", "to", "pe", "la", "su")
+
+
+def _expand_diets(raw: str) -> str:
+    """Expand diet codes to readable Finnish (e.g. 'G, L' -> 'gluteeniton, laktoositon')."""
+    if not raw or not raw.strip():
+        return ""
+    parts = [p.strip().lower() for p in raw.split(",") if p.strip()]
+    expanded = [DIET_CODES.get(p, p.upper()) for p in parts]
+    return ", ".join(expanded)
 
 
 def _resolve_name(name: str) -> str | None:
@@ -131,12 +167,13 @@ def _format_meal_lines(rest: dict, *, include_restaurant_name: bool) -> list[str
             lines.append(f"{meal_indent}{category}:")
         for item in items:
             name = (item.get("mpn") or "").strip()
-            diets = (item.get("mpd") or "").strip()
+            diets_raw = (item.get("mpd") or "").strip()
             if not name:
                 continue
             entry = f"{item_indent}{name}"
-            if diets:
-                entry += f" ({diets})"
+            if diets_raw:
+                diets_readable = _expand_diets(diets_raw)
+                entry += f" — {diets_readable}"
             lines.append(entry)
 
     if include_restaurant_name and len(lines) == 1:
@@ -195,7 +232,9 @@ def get_menu(restaurant: str) -> str:
     if not lines:
         return f"No menu found for {display} today."
 
-    header = f"{display} — {date.today().strftime('%d.%m.%Y')}:"
+    today = date.today()
+    spoken = _spoken_date(today)
+    header = f"Päivämäärä: {spoken}.\n{display} — {today.strftime('%d.%m.%Y')}:"
     return header + "\n" + "\n".join(lines)
 
 
@@ -215,6 +254,9 @@ def get_all_menus() -> str:
         return _menu_fetch_error()
 
     parts: list[str] = []
+    today = date.today()
+    spoken = _spoken_date(today)
+    header = f"Päivämäärä: {spoken}.\nLunch menus — {today.strftime('%d.%m.%Y')}"
     for key in RESTAURANT_DISPLAY:
         display = RESTAURANT_DISPLAY[key]
         lines = _parse_restaurant(data, key)
@@ -223,7 +265,6 @@ def get_all_menus() -> str:
         else:
             parts.append(f"{display}: No menu available.")
 
-    header = f"Lunch menus — {date.today().strftime('%d.%m.%Y')}"
     return header + "\n\n" + "\n\n".join(parts)
 
 

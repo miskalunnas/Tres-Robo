@@ -109,7 +109,7 @@ LLM_TOOLS = [
         "type": "function",
         "function": {
             "name": "get_menu",
-            "description": "Hae tämän päivän ruokalistat Hervannan kampukselta. Käytä AINA kun käyttäjä kysyy ruokaa, lounasta, ruokalistaa tai mitä on ruokana. Ravintolat: reaktori, newton, konehuone, hertsi.",
+            "description": "Hae tämän päivän ruokalistat Hervannan kampukselta. Käytä AINA kun käyttäjä kysyy ruokaa, lounasta tai ruokalistaa. Vastaus sisältää päivämäärän luettavassa muodossa ja erikoisruokavaliot selitettyinä (gluteeniton, vegaani jne.) — käytä niitä sellaisenaan vastauksessasi. Ravintolat: reaktori, newton, konehuone, hertsi.",
             "parameters": {
                 "type": "object",
                 "properties": {
