@@ -1,12 +1,27 @@
-# Optional (may need C++ Build Tools / CMake on Windows): webrtcvad (VAD), face_recognition (vision)
+# Core
 sounddevice
 numpy
-faster-whisper
-noisereduce
-opencv-python
-yt-dlp
+webrtcvad
 python-dotenv
 openai
-elevenlabs
 requests
+
+# STT: faster-whisper (local) tai voice/stt_openai (cloud)
+faster-whisper
+
+# TTS
+elevenlabs
+
+# Audio
+noisereduce
+
+# Vision (Pi Camera Module 2 = picamera2 via apt; OpenCV = USB fallback)
+opencv-python
+
+# Music
+yt-dlp
+
+# Optional: face_recognition (vision, needs cmake/dlib)
+# pip install face_recognition
+
 setuptools

@@ -181,10 +181,12 @@ class ConversationEngine:
                     return
                 remainder = self._strip_phrase(text, matched_wake_word)
                 has_followup = bool(remainder.strip())
-                # Jos vain herätyssana: ei "Hey I'm listening", vaan LLM vastaa persoonalla (mitä isäntä)
-                text_to_process = remainder.strip() if has_followup else "mitä isäntä"
-                self._start_session(now, matched_wake_word, announce=False)
-                self._process_online_text(text_to_process, now=now, language=language)
+                if has_followup:
+                    self._start_session(now, matched_wake_word, announce=False)
+                    self._process_online_text(remainder.strip(), now=now, language=language)
+                else:
+                    self._start_session(now, matched_wake_word, announce=False)
+                    self._speak_reply("Hei!")
                 return
 
             self._process_online_text(text, now=now, language=language)
@@ -291,7 +293,7 @@ class ConversationEngine:
         self._startup_vision_ready = ready_event
         threading.Thread(target=self._run_startup_vision, args=(ready_event,), daemon=True).start()
         if announce:
-            self._speak_reply("Hey! I'm listening.")
+            self._speak_reply("Hei!")
 
     def _run_startup_vision(self, ready_event: threading.Event) -> None:
         """Capture a frame at session start to identify who's in the room."""
@@ -763,7 +765,7 @@ class ConversationEngine:
             query = (args.get("query") or "").strip() or "TRES SFP Robolabs"
             hits = self._store.search_knowledge(query, limit=6)
             if not hits:
-                return "No matching info in knowledge base."
+                return "No info on this topic." if lang == "en" else "Ei tietoa tästä aiheesta."
             return "\n\n".join(hits[:6])
         if name == "see":
             from vision.scene import capture_and_describe
