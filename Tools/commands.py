@@ -236,7 +236,7 @@ def parse_command(text: str) -> dict | None:
 
     # ── 0. Pelkkä genre (esim. "jazz", "chill") = soita
     if normalized in GENRE_ONLY_WORDS:
-        return {"action": "music_play", "query": normalized, "response": f"Soitetaan: {normalized}."}
+        return {"action": "music_play", "query": normalized}
 
     # ── 1. Resume checked before play so "continue playing" is not
     #        eaten by the "play" prefix ────────────────────────────
@@ -266,11 +266,7 @@ def parse_command(text: str) -> dict | None:
             # Älä triggeröi jos query on vain täytesana ("laitetaan vaikka" jne.)
             if query.lower().strip() in PLAY_QUERY_BLOCKLIST:
                 continue
-            return {
-                "action": "music_play",
-                "query": query,
-                "response": f"Soitetaan: {query}",
-            }
+            return {"action": "music_play", "query": query}
 
     # ── 3. Simple music commands ──────────────────────────────────
     # Fuzzy fallback: Whisper-virheet (skipp→skip, pauseta→pause) — difflib 0.82 kynnys.

@@ -167,6 +167,7 @@ class ConversationEngine:
         self._reply_generation = 0
         self._active_reply_text = ""
         self._last_spoken_text = ""
+        self._last_tts_finished_at: float = 0.0  # Cooldown: ei reagoi omaan puheeseen heti TTS:n jälkeen
         self._session_language: str = ""  # viimeisin tunnistettu kieli
 
     # ------------------------------------------------------------------
@@ -187,6 +188,22 @@ class ConversationEngine:
 
             if not self._online:
                 print(f"[Offline heard] {text}")
+                # Musiikki soi: hyväksytään musiikkikomennot ilman herätyssanaa (skip, tauko, lopeta)
+                try:
+                    from Tools.music import is_playing
+                    if is_playing():
+                        cmd = parse_command(text)
+                        if cmd and cmd.get("action") in (
+                            "music_play", "music_skip", "music_pause", "music_resume", "music_stop",
+                            "music_queue", "volume_up", "volume_down",
+                        ):
+                            tool_result = handle_tool_speech(text, language=language)
+                            if tool_result.handled and tool_result.response:
+                                self._speak_reply(tool_result.response)
+                            self._last_activity = now
+                            return
+                except Exception:
+                    pass
                 if not matched_wake_word:
                     return
                 remainder = self._strip_phrase(text, matched_wake_word)
@@ -375,6 +392,9 @@ class ConversationEngine:
         # Hylätään kaiku: botti kuulee omansa mikistä
         refs = [r for r in (self._active_reply_text, self._last_spoken_text) if r and r.strip()]
         if refs and any(self._text_looks_like_echo(text, ref) for ref in refs):
+            return
+        # Cooldown 2 s TTS:n jälkeen: tiukempi kaikun hylkäys (overlap 0.3)
+        if (now - self._last_tts_finished_at) < 2.0 and refs and any(self._text_looks_like_echo(text, ref, min_overlap=0.3) for ref in refs):
             return
         print(f"[Online heard] {text} [lang={language or '?'}]")
         print(f"You said: {text}")
@@ -630,6 +650,7 @@ class ConversationEngine:
         end_session_reason: str | None,
     ) -> None:
         with self._lock:
+            self._last_tts_finished_at = time.monotonic()
             if not handle.interrupted.is_set():
                 self._active_reply_text = ""
             self._last_activity = time.monotonic()
@@ -703,12 +724,8 @@ class ConversationEngine:
 
         # Ei kaiku: hylätään jos teksti muistuttaa botin omaa puhetta
         for ref_text in (self._active_reply_text, self._last_spoken_text):
-            ref_words = set(re.findall(r"\w+", (ref_text or "").lower()))
-            if ref_words:
-                current_words = set(words)
-                overlap = len(current_words & ref_words) / max(1, len(current_words))
-                if overlap >= 0.5:
-                    return False
+            if ref_text and self._text_looks_like_echo(normalized, ref_text):
+                return False
 
         return True
 
@@ -716,8 +733,8 @@ class ConversationEngine:
         """True if text is likely the bot's own TTS picked up by the mic (ei käsitellä)."""
         return self._text_looks_like_echo(text, self._active_reply_text)
 
-    def _text_looks_like_echo(self, text: str, reference: str) -> bool:
-        """True if text is largely the same as reference (bot's own speech). Kynnys 0.4 = vähemmän oman äänen kuulemista."""
+    def _text_looks_like_echo(self, text: str, reference: str, *, min_overlap: float = 0.4) -> bool:
+        """True if text is largely the same as reference (bot's own speech). min_overlap 0.4 = ei reagoi omaan puheeseen."""
         rem = text.lower().strip()
         ref = reference.lower()
         if not rem or not ref:
@@ -727,10 +744,14 @@ class ConversationEngine:
         if not words_rem:
             return False
         overlap = len(words_rem & words_ref) / len(words_rem)
-        if overlap >= 0.5:
+        if overlap >= min_overlap:
             return True
-        if len(rem) >= 6 and rem in ref:
+        if len(rem) >= 4 and rem in ref:
             return True
+        # Sana osana toista: "jazz" kuuluu "jazzia" → kaiku
+        for w in words_rem:
+            if len(w) >= 3 and any(w in r or r in w for r in words_ref):
+                return True
         return False
 
     def _execute_llm_tool(self, name: str, args: dict, *, language: str = "") -> str:
@@ -749,9 +770,8 @@ class ConversationEngine:
             if url is None:
                 return "En löytänyt biisiä." if lang == "fi" else "I couldn't find a track."
             play_async(query, url=url)
-            if is_genre_like(query):
-                return "Soitetaan." if lang == "fi" else "Playing."
-            return f"{_tr('play_ok', lang)}: {query}."
+            from Tools import _play_response_casual
+            return _play_response_casual(query, lang)
         if name == "music_skip":
             from Tools.music import skip
 

@@ -36,6 +36,21 @@ def _tr(key: str, lang: str) -> str:
     return _TOOL_RESPONSES.get((key, lang), _TOOL_RESPONSES.get((key, "fi"), key))
 
 
+def _play_response_casual(query: str, lang: str) -> str:
+    """Rento vastaus kun musiikki laitetaan soimaan: 'Okei isäntä, laitetaan soimaan jazzia.'"""
+    q = (query or "musiikkia").strip().lower()
+    # Genren partitiivi suomeksi (puhekielinen)
+    genre_partitive = {
+        "jazz": "jazzia", "chill": "chillia", "lo-fi": "lofia", "lofi": "lofia",
+        "rock": "rockia", "pop": "popia", "blues": "bluesia", "rauhallinen": "rauhallista",
+        "rento": "rentoa", "taustamusiikki": "taustamusiikkia",
+    }
+    spoken = genre_partitive.get(q, q) if lang == "fi" else q
+    if lang == "fi":
+        return f"Okei isäntä, laitetaan soimaan {spoken}."
+    return f"Alright, putting on {spoken}."
+
+
 @dataclass
 class ToolExecutionResult:
     handled: bool
@@ -72,10 +87,7 @@ def handle_speech(text: str, *, language: str = "") -> ToolExecutionResult:
                     success = False
                 else:
                     play_async(query, url=url)
-                    if is_genre_like(query):
-                        response = "Soitetaan." if lang == "fi" else "Playing."
-                    else:
-                        response = cmd.get("response") or f"{_tr('play_ok', lang)}: {query}."
+                    response = _play_response_casual(query, lang)
         except Exception:
             response = _tr("music_not_ready", lang)
             success = False
