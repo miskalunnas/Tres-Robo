@@ -57,19 +57,28 @@ from Tools import handle_speech as handle_tool_speech
 from Tools.commands import parse_command
 from voice.tts import SpeechHandle, interrupt as interrupt_speech, speak
 
-WAKE_WORDS = [ 
+# Pidemmät ensin — "hei bot" ennen "bot" jotta remainder = "mikä kello on"
+WAKE_WORDS = [
+    "hei bot",
+    "hei botti",
+    "hei robot",
+    "hei robotti",
+    "kuule bot",
+    "kuule botti",
+    "hey bot",
+    "hi bot",
+    "listen bot",
     "founderbot",
-    "founderbott",
     "founder bot",
-    "founder, bot",
-    "found a bot",
     "founder bott",
+    "founderbott",
     "founderbotti",
+    "found a bot",
+    "founder",
     "bot",
     "robot",
     "robotti",
     "botti",
-    "founder",
 ]
 
 
@@ -205,14 +214,14 @@ class ConversationEngine:
             matched_interrupt = next((word for word in INTERRUPT_WORDS if word in normalized), None)
             matched_session_end = self._is_session_end_intent(text)
             local_command = parse_command(text)
-            # Lyhyet segmentit: 1–3 sanaa ilman wake/interrupt/session_end/komento → taustamelu, hylätään
+            # Lyhyet segmentit: 5 tai vähemmän sanaa ilman wake/interrupt/session_end/komento → taustamelu, hylätään
             words = re.findall(r"\w+", normalized)
             if (
                 not matched_wake_word
                 and not matched_interrupt
                 and not matched_session_end
                 and local_command is None
-                and len(words) <= 3
+                and len(words) <= 5
             ):
                 preview = (text[:40] + "...") if len(text) > 40 else text
                 print(f"[Interrupt ignored] Short (no wake/command): {preview}")
@@ -342,7 +351,7 @@ class ConversationEngine:
         self._session_id = None
         self._session_language = ""
         self._brain.reset()
-        print("[Engine] OFFLINE. Say 'founderbot', 'hei bot' or 'kuule bot' to wake me up.")
+        print("[Engine] OFFLINE. Say 'hei bot', 'kuule bot' or 'founderbot' to wake me up.")
 
     def _process_online_text(
         self,
@@ -677,15 +686,15 @@ class ConversationEngine:
         )
         has_wake = any(w in normalized for w in WAKE_WORDS)
 
-        # Vahva adressointi: herätyssana tai 2+ adressointisanaa → keskeytys helpommin
+        # Vahva adressointi: herätyssana tai 2+ adressointisanaa → korkeampi kynnys (ei keskeytä helposti)
         if has_wake or addressing_count >= 2:
-            if len(words) >= 6 and len(normalized) >= 30:
+            if len(words) >= 8 and len(normalized) >= 40:
                 pass  # fall through to echo check
             else:
                 return False
-        # Heikko adressointi: 1 sana → korkeampi kynnys (taustakeskustelu ei keskeytä)
+        # Heikko adressointi: 1 sana → vielä korkeampi kynnys (taustakeskustelu ei keskeytä)
         elif addressing_count >= 1:
-            if len(words) >= 10 and len(normalized) >= 50:
+            if len(words) >= 12 and len(normalized) >= 60:
                 pass
             else:
                 return False
@@ -698,7 +707,7 @@ class ConversationEngine:
             if ref_words:
                 current_words = set(words)
                 overlap = len(current_words & ref_words) / max(1, len(current_words))
-                if overlap >= 0.4:
+                if overlap >= 0.5:
                     return False
 
         return True
@@ -718,7 +727,7 @@ class ConversationEngine:
         if not words_rem:
             return False
         overlap = len(words_rem & words_ref) / len(words_rem)
-        if overlap >= 0.4:
+        if overlap >= 0.5:
             return True
         if len(rem) >= 6 and rem in ref:
             return True
@@ -731,10 +740,15 @@ class ConversationEngine:
         lang = "en" if language == "en" else "fi"
 
         if name == "play_music":
-            from Tools.music import play_async, is_genre_like
+            from Tools.music import play_async, resolve_url, is_genre_like, check_music_ready
 
+            if not check_music_ready():
+                return _tr("music_not_ready", lang)
             query = (args.get("query") or "music").strip() or "music"
-            play_async(query)
+            url = resolve_url(query)
+            if url is None:
+                return "En löytänyt biisiä." if lang == "fi" else "I couldn't find a track."
+            play_async(query, url=url)
             if is_genre_like(query):
                 return "Soitetaan." if lang == "fi" else "Playing."
             return f"{_tr('play_ok', lang)}: {query}."

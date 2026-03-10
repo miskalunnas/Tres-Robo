@@ -30,6 +30,10 @@ except Exception:
 # Path to cookies.txt for YouTube Premium (default: bot uses this account for playback)
 _YT_COOKIES_FILE = os.getenv("YT_COOKIES_FILE", "").strip()
 
+# Ducking: volume % kun puhe kuuluu (38 = musiikki taustalla, ei kokonaan pois). Env: DUCK_VOLUME=38
+_dv = os.getenv("DUCK_VOLUME", "38").strip()
+DUCK_VOLUME_PCT = int(_dv) if _dv.isdigit() and 1 <= int(_dv) <= 100 else 38
+
 
 def check_music_ready() -> bool:
     """Check if yt-dlp and a player (ffplay/mpv) are available. Print a one-line status. Returns True if ready."""
@@ -235,10 +239,23 @@ class MusicPlayer:
                     url,
                 ]
 
+        # AUDIO_DEVICE: mpv --audio-device, ffplay -audio_device_index (Windows use index)
+        audio_device = os.environ.get("AUDIO_DEVICE", "").strip()
+        if audio_device:
+            if self._player_cmd == "mpv":
+                args.insert(-1, f"--audio-device={audio_device}")
+            elif self._player_cmd == "ffplay":
+                try:
+                    idx = int(audio_device)
+                    args.insert(-1, "-audio_device_index")
+                    args.insert(-1, str(idx))
+                except ValueError:
+                    pass  # ffplay Windows needs index, not name
+
         kwargs: dict = {
             "stdin": subprocess.PIPE,
             "stdout": subprocess.DEVNULL,
-            "stderr": subprocess.DEVNULL,
+            "stderr": subprocess.PIPE,  # Capture for debugging when playback fails
         }
         if os.name == "nt":
             flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -269,6 +286,13 @@ class MusicPlayer:
         if proc is None:
             return
         proc.wait()
+        if proc.returncode != 0 and proc.stderr:
+            try:
+                err = proc.stderr.read().decode(errors="replace").strip()
+                if err:
+                    print(f"[Music] Player exited (code {proc.returncode}): {err}", file=sys.stderr)
+            except Exception:
+                pass
 
         with self._lock:
             if self._stopped:
@@ -315,8 +339,8 @@ class MusicPlayer:
     # Public API
     # ------------------------------------------------------------------
 
-    def play(self, query: str) -> bool:
-        """Stop current playback, clear queue, and play *query* immediately."""
+    def play(self, query: str, *, url: str | None = None) -> bool:
+        """Stop current playback, clear queue, and play *query* immediately. If url given, skip resolution."""
         query = (query or "music").strip() or "music"
         self._kill_current()
 
@@ -324,10 +348,11 @@ class MusicPlayer:
             self._queue.clear()
             self._stopped = False
 
-        print(f"[Music] Resolving: {query!r} ...")
-        url = self._resolve_url(query)
         if url is None:
-            return False
+            print(f"[Music] Resolving: {query!r} ...")
+            url = self._resolve_url(query)
+            if url is None:
+                return False
 
         with self._lock:
             self._current_query = query
@@ -341,10 +366,10 @@ class MusicPlayer:
         self._start_watcher()
         return True
 
-    def play_async(self, query: str) -> None:
+    def play_async(self, query: str, *, url: str | None = None) -> None:
         """Start playback in a background thread so the caller can return immediately (e.g. for TTS)."""
         def _run() -> None:
-            self.play(query)
+            self.play(query, url=url)
         t = threading.Thread(target=_run, daemon=True)
         t.start()
 
@@ -460,8 +485,6 @@ class MusicPlayer:
         with self._lock:
             return self._process is not None and not self._paused
 
-    DUCK_VOLUME = 12  # Volume % when ducked (puhe kuuluu paremmin)
-
     def _mpv_send_volume(self, volume: int) -> bool:
         """Send volume to mpv via IPC. Returns True on success."""
         path = self._ipc_socket_path
@@ -493,8 +516,8 @@ class MusicPlayer:
                 return
             self._saved_volume_before_duck = self._volume
             self._ducked = True
-        self._mpv_send_volume(self.DUCK_VOLUME)
-        print(f"[Music] Ducking → {self.DUCK_VOLUME}%")
+        self._mpv_send_volume(DUCK_VOLUME_PCT)
+        print(f"[Music] Ducking → {DUCK_VOLUME_PCT}%")
 
     def unduck(self) -> None:
         """Restore volume after ducking (mpv only)."""
@@ -584,13 +607,19 @@ class MusicPlayer:
 _player = MusicPlayer()
 
 
-def play(query: str) -> bool:
-    return _player.play(query)
+def resolve_url(query: str) -> str | None:
+    """Resolve a search query to a direct audio URL. Returns None if not found."""
+    return _player._resolve_url((query or "music").strip() or "music")
 
 
-def play_async(query: str) -> None:
+def play(query: str, *, url: str | None = None) -> bool:
+    """Play query (or pre-resolved url). Returns True if playback started."""
+    return _player.play(query, url=url)
+
+
+def play_async(query: str, *, url: str | None = None) -> None:
     """Start playback in background; use when you want to return a reply to the user immediately."""
-    _player.play_async(query)
+    _player.play_async(query, url=url)
 
 
 def add_to_queue(query: str) -> None:

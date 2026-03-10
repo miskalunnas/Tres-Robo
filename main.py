@@ -43,16 +43,17 @@ VAD_FRAME_DURATION_MS = int(_vad_frame) if _vad_frame.isdigit() and int(_vad_fra
 # Segmenting: how much audio to collect before sending to Whisper.
 MIN_SEGMENT_SECONDS = 0.5
 MAX_SEGMENT_SECONDS = 8.0
-# OFFLINE: herätys sujuvampi — lyhyet "hei bot" pääsevät läpi.
-MIN_SEGMENT_WHEN_OFFLINE = 0.35
+# OFFLINE: herätys helppo — lyhyet "hei bot" pääsevät läpi nopeasti.
+MIN_SEGMENT_WHEN_OFFLINE = 0.25
+MAX_SILENCE_WHEN_OFFLINE = 0.6  # Lyhyempi hiljaisuus = herätys nopeampi (0.9 normaalisti)
 # ONLINE + musiikki: korkeampi kynnys = botti ei keskeytä musiikkia lyhyellä puheella.
-MIN_SEGMENT_WHEN_MUSIC_PLAYING = 1.5
+MIN_SEGMENT_WHEN_MUSIC_PLAYING = 2.2
 # Hiljaisuus ennen kuin lähetetään Whisperille: isompi = botti ei puhu päälle, pienempi = nopeampi vastaus.
 MAX_SILENCE_BETWEEN_SPEECH_SECONDS = 0.9
 
 # Interruption capture: botti kuuntelee puhuessaan, päättää reagoidaanko.
-# MIN = vähimmäisaika ennen lähetystä; MAX = puskurin koko — korkea MAX = koko puhe bottille.
-INTERRUPT_MIN_SEGMENT_SECONDS = 1.8
+# MIN = vähimmäisaika ennen lähetystä — korkeampi = ei keskeytä helposti taustamelusta.
+INTERRUPT_MIN_SEGMENT_SECONDS = 2.4
 INTERRUPT_MAX_SEGMENT_SECONDS = 8.0  # Sama kuin normaali — koko alusta lähtien kuunneltu puhe saatavilla
 INTERRUPT_MAX_SILENCE_BETWEEN_SPEECH_SECONDS = 0.5
 
@@ -69,7 +70,8 @@ WHISPER_MODEL = "small"
 # Whisper: herätyssanat ensin. FI + EN fraasit tasapainottavat kielitunnistusta.
 # Genret ja paikat: Whisper tunnistaa usein väärin — prompt auttaa (jazz ei jas, seuraava ei seuraa).
 WHISPER_PROMPT = (
-    "Founderbot, founder bot, hei bot, hey bot, hi bot, kuule bot, listen bot. "
+    "Hei bot, hei botti, kuule bot, kuule botti, hey bot, hi bot, listen bot. "
+    "Founderbot, founder bot. "
     "Play, skip, pause, resume, stop, queue, volume up, volume down. "
     "Soita, tauko, jatka, lopeta, seuraava, kovempaa, hiljempaa. "
     "Jazz, chill, lo-fi, lofi, rauhallinen, rento, taustamusiikki, rock, pop, blues. "
@@ -379,7 +381,7 @@ def listen_forever() -> None:
         channels=MIC_CHANNELS,
         callback=audio_callback,
     ):
-        print(f"[Engine] OFFLINE. Say 'founderbot', 'hei bot' or 'kuule bot' to wake me up.")
+        print("[Engine] OFFLINE. Say 'hei bot', 'kuule bot' or 'founderbot' to wake me up.")
         print("[Engine] When ONLINE: music (play, skip, pause, resume, stop), menu, time, joke.")
         try:
             while True:
@@ -447,10 +449,14 @@ def listen_forever() -> None:
                 else:
                     if speech_frames:
                         silence_duration += frame_seconds
+                        try:
+                            offline = not engine.is_online()
+                        except Exception:
+                            offline = False
                         max_silence = (
                             INTERRUPT_MAX_SILENCE_BETWEEN_SPEECH_SECONDS
                             if capture_mode == "interrupt"
-                            else MAX_SILENCE_BETWEEN_SPEECH_SECONDS
+                            else (MAX_SILENCE_WHEN_OFFLINE if offline else MAX_SILENCE_BETWEEN_SPEECH_SECONDS)
                         )
                         if capture_mode == "interrupt":
                             min_segment = INTERRUPT_MIN_SEGMENT_SECONDS
