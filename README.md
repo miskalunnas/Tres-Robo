@@ -88,7 +88,7 @@ For a 4-mic array (e.g. ReSpeaker), set in `.env`:
 
 - **MIC_DEVICE**: ALSA string (e.g. `hw:2,0`) or PortAudio device index (e.g. `2`). Find devices: `python -c "import sounddevice; print(sounddevice.query_devices())"` or `arecord -L`.
 - **MIC_CHANNELS**: `1` = single processed channel (default), `4` = raw 4-channel (mixed to mono).
-- **MIC_SAMPLE_RATE**: Device sample rate. Many arrays use 16 kHz; set `16000` to skip resampling.
+- **MIC_SAMPLE_RATE**: Device sample rate (e.g. `16000`). Leave unset to auto-detect; ReSpeaker 4-mic often needs 16 kHz.
 - **USE_DENOISER**: `0` or `false` if the array already does noise suppression.
   
 ## Next steps

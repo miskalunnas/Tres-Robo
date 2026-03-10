@@ -276,6 +276,31 @@ def _dialogue_worker(engine: ConversationEngine) -> None:
             utterance_queue.task_done()
 
 
+def _resolve_device_sample_rate(device, channels: int) -> int:
+    """Selvittää laitteen tuen sample raten. MIC_SAMPLE_RATE env ohittaa."""
+    _sr = os.environ.get("MIC_SAMPLE_RATE", "").strip()
+    if _sr.isdigit():
+        return int(_sr)
+    # Kokeile laitteen default_samplerate (device=None → default input)
+    dev = device if device is not None else sd.default.device[0]
+    try:
+        info = sd.query_devices(dev, "input")
+        rate = int(info.get("default_samplerate", 0) or 0)
+        if rate > 0:
+            sd.check_input_settings(device=device, channels=channels, samplerate=rate)
+            return rate
+    except Exception:
+        pass
+    # ReSpeaker 4-mic yms. usein vain 16 kHz. Kokeile yleisimmät.
+    for rate in (16_000, 48_000, 44_100):
+        try:
+            sd.check_input_settings(device=device, channels=channels, samplerate=rate)
+            return rate
+        except sd.PortAudioError:
+            continue
+    return 48_000  # viimeinen yritys
+
+
 def listen_forever() -> None:
     # Mikki: MIC_DEVICE (ALSA hw:X,Y tai PortAudio-indeksi), MIC_CHANNELS (1/4),
     # MIC_SAMPLE_RATE (esim. 16000), USE_DENOISER (0/1). Katso README "4-array microphone".
@@ -285,9 +310,7 @@ def listen_forever() -> None:
     # MIC_CHANNELS: 1 = mono/käsitelty, 4 = 4-array raaka → keskiarvo monoksi.
     MIC_CHANNELS = int(os.environ.get("MIC_CHANNELS", "1"))
 
-    # MIC_SAMPLE_RATE: laitteen sample rate. Jos 16000, ei resamplea VAD:lle.
-    _sr = os.environ.get("MIC_SAMPLE_RATE", "").strip()
-    native_sr = int(_sr) if _sr.isdigit() else 48_000
+    native_sr = _resolve_device_sample_rate(MIC_DEVICE, MIC_CHANNELS)
 
     print(f"[Mic] device={MIC_DEVICE} channels={MIC_CHANNELS} {native_sr} Hz, VAD/STT at {VAD_SAMPLE_RATE} Hz")
 
