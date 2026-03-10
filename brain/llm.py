@@ -130,7 +130,10 @@ LLM_TOOLS = [
         "type": "function",
         "function": {
             "name": "lookup_knowledge",
-            "description": "Search the knowledge base when you need facts. Call this when context above doesn't have the answer. Use query like 'TRES', 'SFP', 'robolabs', 'bot_persona', 'Lauri', 'isäntä'. Always use the returned info in your reply.",
+            "description": (
+                "Search the knowledge base for facts. CALL when: user asks about TRES, SFP, Robolabs, house people (Lauri, Netta, Olli...), slang (isäntä, raba, pöhinä), or bot persona. "
+                "Use short query: 'TRES', 'SFP', 'robolabs', 'Lauri', 'bot_persona', 'isäntä'. Use returned info in your reply. Do not guess — fetch from DB."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -567,7 +570,12 @@ class Brain:
             messages.append(
                 {
                     "role": "system",
-                    "content": f"Konteksti (muisti + tietopohja):\n{context_text}",
+                    "content": (
+                        "KONTEKSTI (käytä tätä vastataksesi):\n"
+                        "Muisti = käyttäjän/istunnon tiedot. Tietopohja = TRES, SFP, Robolabs, housen tyypit, slangit. "
+                        "Jos vastaus on kontekstissa, käytä sitä. Jos puuttuu, kutsu lookup_knowledge.\n\n"
+                        f"{context_text}"
+                    ),
                 }
             )
         # Keskeytys
@@ -582,9 +590,8 @@ class Brain:
             {
                 "role": "system",
                 "content": (
-                    "Yhdistä vastauksesi keskusteluun: viittaa edellisiin viesteihin ('se', 'tuo', 'sama'). "
-                    "Muista viimeisimmät vaihtiot ja aihe; pysy samalla kielellä kuin käyttäjä on käyttänyt. "
-                    "Kun kontekstissa ei ole vastausta, käytä lookup_knowledge-työkalua. "
+                    "Vastaussäännöt: Viittaa edellisiin viesteihin ('se', 'tuo', 'sama'). Pysy samalla kielellä kuin käyttäjä. "
+                    "TRES/SFP/Robolabs/housen tyypit/slangi: käytä kontekstin tietopohjaa. Jos vastaus puuttuu, kutsu lookup_knowledge(query='TRES') tms. Älä arvaa — hae tietokannasta. "
                     "Vastaa aina kontekstin perusteella."
                 ),
             }

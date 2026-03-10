@@ -731,10 +731,12 @@ class ConversationEngine:
         lang = "en" if language == "en" else "fi"
 
         if name == "play_music":
-            from Tools.music import play_async
+            from Tools.music import play_async, is_genre_like
 
             query = (args.get("query") or "music").strip() or "music"
             play_async(query)
+            if is_genre_like(query):
+                return "Soitetaan." if lang == "fi" else "Playing."
             return f"{_tr('play_ok', lang)}: {query}."
         if name == "music_skip":
             from Tools.music import skip

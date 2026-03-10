@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import threading
 import uuid
@@ -12,6 +13,21 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+
+# Tunnettuja entiteettejä — lisätään hakuun kun käyttäjä viittaa näihin
+_KNOWLEDGE_ENTITIES = frozenset({
+    "tres", "sfp", "robolabs", "lauri", "netta", "jooel", "miska", "oliver", "arttu",
+    "jani", "olli", "miro", "diar", "hilma", "hilmuri", "ida", "karti",
+    "isäntä", "isanta", "emäntä", "emanta", "raba", "pöhinä", "pohina", "founderi",
+    "fuksi", "superfuksi", "bot_persona", "persona", "reaktori", "newton",
+})
+# Yleisiä täytesanoja — ei lisätä FTS5-hakuun (liian rajoittava AND)
+_STOP_WORDS = frozenset({
+    "mikä", "mika", "mitä", "mita", "on", "ei", "että", "etta", "ja", "tai", "se",
+    "tämä", "tama", "tuo", "minä", "mina", "sinä", "sina", "hän", "han", "me", "te",
+    "he", "kuka", "ketä", "keta", "missä", "missa", "milloin", "miten", "miksi",
+    "the", "a", "an", "is", "are", "what", "who", "where", "when", "how", "why",
+})
 
 DB_PATH = Path(__file__).resolve().parent.parent / "data" / "robot.db"
 
@@ -382,6 +398,9 @@ class MemoryStore:
         query = query.strip()
         if not query:
             return []
+        # Monisanaiselle haulle käytä OR-termiä (implisiittinen AND antaa usein 0 tulosta)
+        if len(query.split()) >= 2:
+            query = self._build_knowledge_search_query(query)
         # Try FTS5 first (faster, better ranking)
         try:
             fts_query = query.replace('"', '""').strip()[:500]
@@ -400,7 +419,11 @@ class MemoryStore:
         except sqlite3.OperationalError:
             pass
         # Fallback: LIKE search (works when FTS5 not available, e.g. Raspberry Pi)
-        terms = [t.strip() for t in query.split() if len(t.strip()) >= 2][:6]
+        # Erotellaan OR-termit (FTS5-muoto "A OR B OR C")
+        terms = [t.strip() for t in re.split(r"\s+OR\s+", query, flags=re.I) if len(t.strip()) >= 2]
+        if not terms:
+            terms = [t.strip() for t in query.split() if len(t.strip()) >= 2]
+        terms = terms[:6]
         if not terms:
             return []
         like_clause = " OR ".join(
@@ -458,6 +481,24 @@ class MemoryStore:
                 pass
         return count
 
+    @staticmethod
+    def _build_knowledge_search_query(user_text: str) -> str:
+        """Rakenna FTS5-hakulauseke OR-termien avulla — implisiittinen AND antaa usein 0 tulosta."""
+        text = (user_text or "").lower().strip()
+        if not text:
+            return "TRES OR persona"
+        words = set(re.findall(r"[a-zäöå0-9]+", text))
+        words -= _STOP_WORDS
+        # Lisää tunnettuja entiteettejä jos käyttäjä viittaa niihin
+        for ent in _KNOWLEDGE_ENTITIES:
+            if ent in text or ent in words:
+                words.add(ent)
+        # Vähintään 2 merkkiä, max 12 termiä
+        terms = [w for w in words if len(w) >= 2][:12]
+        if not terms:
+            return "TRES OR persona"
+        return " OR ".join(terms)
+
     def get_context_as_text(
         self,
         query: str,
@@ -473,7 +514,7 @@ class MemoryStore:
         if memory:
             parts.append("Muisti (käyttäjä/istunto):\n" + memory)
         if include_knowledge:
-            search_query = (query.strip() + " persona TRES").strip()
+            search_query = self._build_knowledge_search_query(query)
             hits = self.search_knowledge(search_query, limit=knowledge_limit)
             if hits:
                 parts.append("Tietopohja (käytä tätä vastataksesi):\n" + "\n\n".join(hits))

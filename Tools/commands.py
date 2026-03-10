@@ -39,6 +39,8 @@ QUEUE_PREFIXES = (
 )
 # Täytesanat: jos query on vain näitä, älä soita (ei "laitetaan vaikka" tms.)
 PLAY_QUERY_BLOCKLIST = frozenset({"vaikka", "sitten", "nyt", "vähän", "vahan", "ehkä", "ehka"})
+# Pelkkä genre = soita genren mukaista (Whisper voi tunnistaa "jazz" suoraan)
+GENRE_ONLY_WORDS = frozenset({"jazz", "chill", "lo-fi", "lofi", "rauhallinen", "rento", "taustamusiikki"})
 
 # Simple keywords (no query).
 SKIP_KEYWORDS = (
@@ -173,6 +175,28 @@ ACKNOWLEDGMENT_KEYWORDS = (
 
 
 import re
+from difflib import SequenceMatcher
+
+# Whisper-virheet: korjataan ennen parsintaa (esim. "jas" → "jazz").
+# Avain = väärin tunnistettu, arvo = oikea muoto. Käytetään word-boundary korvauksia.
+_WHISPER_CORRECTIONS: dict[str, str] = {
+    "jas": "jazz",
+    "jassi": "jazz",
+    "jass": "jazz",
+    "shill": "chill",
+    "seuraa": "seuraava",
+}
+
+
+def _normalize_whisper_text(text: str) -> str:
+    """Korjaa yleisiä Whisper-virheitä ennen komentojen parsintaa."""
+    if not text or not text.strip():
+        return text
+    result = text
+    for wrong, correct in _WHISPER_CORRECTIONS.items():
+        # Korvaa vain kokonaisina sanoina (ei "jasmine" → "jazzmine")
+        result = re.sub(rf"\b{re.escape(wrong)}\b", correct, result, flags=re.IGNORECASE)
+    return result
 
 
 def _extract_after(text: str, keyword: str) -> str:
@@ -185,19 +209,39 @@ def _extract_after(text: str, keyword: str) -> str:
 
 def _word_match(keyword: str, text: str) -> bool:
     """True if *keyword* appears as whole words in *text* (not inside another word)."""
-    return bool(re.search(rf"\b{re.escape(keyword)}\b", text))
+    return bool(re.search(rf"\b{re.escape(keyword)}\b", text, re.IGNORECASE))
+
+
+def _fuzzy_match_keywords(keywords: tuple[str, ...], text: str, *, min_ratio: float = 0.82) -> bool:
+    """True if any word in text is similar enough to any keyword (Whisper-virheet: skipp→skip)."""
+    words = re.findall(r"[a-zäöå]+", text.lower())
+    for w in words:
+        if len(w) < 3:
+            continue
+        for kw in keywords:
+            if len(kw) < 3:
+                continue
+            ratio = SequenceMatcher(None, w, kw).ratio()
+            if ratio >= min_ratio:
+                return True
+    return False
 
 
 def parse_command(text: str) -> dict | None:
     """Parse user text into an action dict, or None if not a known command."""
     if not text or not text.strip():
         return None
+    text = _normalize_whisper_text(text)
     normalized = text.strip().lower()
+
+    # ── 0. Pelkkä genre (esim. "jazz", "chill") = soita
+    if normalized in GENRE_ONLY_WORDS:
+        return {"action": "music_play", "query": normalized, "response": f"Soitetaan: {normalized}."}
 
     # ── 1. Resume checked before play so "continue playing" is not
     #        eaten by the "play" prefix ────────────────────────────
 
-    if any(_word_match(kw, normalized) for kw in RESUME_KEYWORDS):
+    if any(_word_match(kw, normalized) for kw in RESUME_KEYWORDS) or _fuzzy_match_keywords(RESUME_KEYWORDS, normalized):
         return {"action": "music_resume", "response": "Jatketaan."}
 
     # ── 2. Prefix commands (carry a query) — checked before simple
@@ -229,14 +273,15 @@ def parse_command(text: str) -> dict | None:
             }
 
     # ── 3. Simple music commands ──────────────────────────────────
+    # Fuzzy fallback: Whisper-virheet (skipp→skip, pauseta→pause) — difflib 0.82 kynnys.
 
-    if any(_word_match(kw, normalized) for kw in SKIP_KEYWORDS):
+    if any(_word_match(kw, normalized) for kw in SKIP_KEYWORDS) or _fuzzy_match_keywords(SKIP_KEYWORDS, normalized):
         return {"action": "music_skip", "response": "Skipping to next song."}
 
-    if any(_word_match(kw, normalized) for kw in PAUSE_KEYWORDS):
+    if any(_word_match(kw, normalized) for kw in PAUSE_KEYWORDS) or _fuzzy_match_keywords(PAUSE_KEYWORDS, normalized):
         return {"action": "music_pause", "response": "Tauko."}
 
-    if any(_word_match(kw, normalized) for kw in STOP_KEYWORDS):
+    if any(_word_match(kw, normalized) for kw in STOP_KEYWORDS) or _fuzzy_match_keywords(STOP_KEYWORDS, normalized):
         return {"action": "music_stop", "response": "Lopetettu."}
 
     # ── 3. Volume ─────────────────────────────────────────────────

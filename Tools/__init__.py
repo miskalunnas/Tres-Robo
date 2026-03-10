@@ -60,10 +60,13 @@ def handle_speech(text: str, *, language: str = "") -> ToolExecutionResult:
 
     if action == "music_play":
         try:
-            from .music import play_async
+            from .music import play_async, is_genre_like
             query = (cmd.get("query") or "music").strip() or "music"
             play_async(query)
-            response = cmd.get("response") or f"{_tr('play_ok', lang)}: {query}."
+            if is_genre_like(query):
+                response = "Soitetaan." if lang == "fi" else "Playing."
+            else:
+                response = cmd.get("response") or f"{_tr('play_ok', lang)}: {query}."
         except Exception:
             response = _tr("music_not_ready", lang)
             success = False

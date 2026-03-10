@@ -33,10 +33,12 @@ else:
 VAD_SAMPLE_RATE = 16_000
 
 # VAD: 0 = herkimmin (kauempaa puhuttu), 1 = tasapaino, 2 = vähemmän taustamelua, 3 = vahvin.
-VAD_AGGRESSIVENESS = 1
+_vad = os.environ.get("VAD_AGGRESSIVENESS", "1").strip()
+VAD_AGGRESSIVENESS = int(_vad) if _vad.isdigit() and 0 <= int(_vad) <= 3 else 1
 
-# VAD frame length (10, 20 or 30 ms).
-VAD_FRAME_DURATION_MS = 30
+# VAD frame length (10, 20 or 30 ms). 20 ms = tarkempi, enemmän CPU.
+_vad_frame = os.environ.get("VAD_FRAME_DURATION_MS", "20").strip()
+VAD_FRAME_DURATION_MS = int(_vad_frame) if _vad_frame.isdigit() and int(_vad_frame) in (10, 20, 30) else 20
 
 # Segmenting: how much audio to collect before sending to Whisper.
 MIN_SEGMENT_SECONDS = 0.5
@@ -64,13 +66,17 @@ USE_DENOISER = _use_denoiser in ("1", "true", "yes", "on")
 
 # Whisper model: "tiny" = nopein, "base" = nopea kompromissi, "small"/"medium" = tarkempi suomeen.
 WHISPER_MODEL = "small"
-# Whisper: herätyssanat ensin. FI + EN fraasit tasapainottavat kielitunnistusta (älä biasoi suomeen).
+# Whisper: herätyssanat ensin. FI + EN fraasit tasapainottavat kielitunnistusta.
+# Genret ja paikat: Whisper tunnistaa usein väärin — prompt auttaa (jazz ei jas, seuraava ei seuraa).
 WHISPER_PROMPT = (
     "Founderbot, founder bot, hei bot, hey bot, hi bot, kuule bot, listen bot. "
     "Play, skip, pause, resume, stop, queue, volume up, volume down. "
     "Soita, tauko, jatka, lopeta, seuraava, kovempaa, hiljempaa. "
+    "Jazz, chill, lo-fi, lofi, rauhallinen, rento, taustamusiikki, rock, pop, blues. "
+    "Soita jazz, soita chill, play jazz, play chill. "
     "What time, tell me a joke, lunch menu, what's for lunch. "
-    "Kello, vitsi, ruokalista, lounas, reaktori, newton. "
+    "Kello, vitsi, ruokalista, lounas, reaktori, newton, hertsi, konehuone, foodco. "
+    "TRES, SFP, Robolabs, Lauri, Netta, Miro, Olli. "
     "Hello, hi, hey, thanks, bye, goodbye. Moi, hei, moro, kiitos, näkemiin. "
     "Lopetetaan, kiitos hei, selvä kiitos. That's all, see you later, going offline. Mene nukkumaan, mennä nukkumaan, nuku nyt, lepotila, go to sleep, sleep now."
 )
@@ -110,7 +116,11 @@ def _put_latest(q: queue.Queue, item) -> None:
 
 
 # Mikrofonivahvistus: kauempaa puhuttu puhe kuuluu paremmin (1.0 = ei vahvistusta).
-MIC_GAIN = 1.5
+try:
+    MIC_GAIN = float(os.environ.get("MIC_GAIN", "1.5").strip())
+except (ValueError, TypeError):
+    MIC_GAIN = 1.5
+MIC_GAIN = max(0.5, min(5.0, MIC_GAIN))
 
 
 def audio_callback(indata, frames, time_info, status) -> None:  # noqa: ARG001
@@ -158,10 +168,12 @@ def _prepare_audio(frames: list[np.ndarray], native_sr: int) -> np.ndarray:
 def _transcribe_cloud(audio: np.ndarray) -> tuple[str, str]:
     """OpenAI Whisper API (pilvi). Palauttaa (teksti, kielikoodi)."""
     t0 = time.monotonic()
+    stt_lang = os.environ.get("STT_LANGUAGE", "").strip().lower()
+    language = stt_lang if stt_lang in ("fi", "en", "sv", "de", "fr", "es") else None
     text, lang = stt_openai.transcribe(
         audio,
         VAD_SAMPLE_RATE,
-        language=None,  # auto-detect
+        language=language,  # None = auto-detect
         prompt=WHISPER_PROMPT,
         return_language=True,
     )

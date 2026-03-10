@@ -69,6 +69,11 @@ def check_music_ready() -> bool:
     return False
 
 
+def is_genre_like(query: str) -> bool:
+    """True jos query on genre/tyyli (jazz, chill, lo-fi jne.) — ei artisti/biisi."""
+    return MusicPlayer._is_genre_like(query or "")
+
+
 class MusicPlayer:
     """Manages a playback queue and the current player subprocess."""
 
@@ -114,7 +119,7 @@ class MusicPlayer:
     @staticmethod
     def _is_genre_like(query: str) -> bool:
         """True jos query on genre/tyyli — etsitään genren mukaan biisi, ei sananmukaisesti."""
-        q = query.lower().strip()
+        q = MusicPlayer._normalize_query(query)
         if not q or len(q) > 40:
             return False
         genre_words = (
@@ -128,8 +133,37 @@ class MusicPlayer:
         return any(g in q or g in words for g in genre_words)
 
     @staticmethod
+    def _normalize_query(query: str) -> str:
+        """Poista täytesanat ja normalisoi suomenkieliset genren muodot hakua varten."""
+        q = query.lower().strip()
+        if not q:
+            return q
+        fillers = ("jotain", "vähän", "vahan", "vaikka", "ehkä", "ehka", "some", "something", "anything")
+        changed = True
+        while changed:
+            changed = False
+            for f in fillers:
+                if q.startswith(f + " "):
+                    q = q[len(f) + 1 :].strip()
+                    changed = True
+                    break
+                if q.endswith(" " + f):
+                    q = q[: -len(f) - 1].strip()
+                    changed = True
+                    break
+        # Suomenkieliset genren muodot -> perusmuoto
+        genre_forms = {
+            "jazzia": "jazz", "jazziä": "jazz", "jazzista": "jazz",
+            "chillia": "chill", "chilliä": "chill", "chillistä": "chill",
+            "rauhallista": "rauhallinen", "rauhalliseen": "rauhallinen",
+            "lo-fia": "lo-fi", "lofia": "lofi",
+        }
+        return genre_forms.get(q, q)
+
+    @staticmethod
     def _resolve_url(query: str) -> str | None:
         """Use yt-dlp to turn a search query into a direct audio URL. Retries with fallback if first attempt fails."""
+        query = MusicPlayer._normalize_query(query) or query
         # Genre/tyyli: etsi "jazz music" tms., ei pelkkä "jazz" (voi antaa huonon tuloksen)
         if MusicPlayer._is_genre_like(query):
             search_attempts = [f"{query} music", f"{query} mix", query, "lofi hip hop radio"]
