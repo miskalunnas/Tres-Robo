@@ -20,7 +20,7 @@ def capture_and_describe(question: str, client) -> str:
         import cv2
     except ImportError:
         print("[Vision] opencv-python not installed. Run: pip install opencv-python-headless", file=sys.stderr)
-        return "Kameraohjelmisto puuttuu."
+        return "Silmät eivät toimi juuri nyt."
 
     # Capture one frame — warmup is short since we only need a single snapshot.
     try:
@@ -28,7 +28,7 @@ def capture_and_describe(question: str, client) -> str:
             frame = cam.capture()  # BGR numpy array (H, W, 3)
     except Exception as exc:
         print(f"[Vision] Camera capture error: {exc}", file=sys.stderr)
-        return "En saanut kuvaa kamerasta."
+        return "En näe juuri nyt."
 
     # Always save last frame for debugging — inspect at vision_debug/vision_debug.jpg
     _DEBUG_DIR.mkdir(parents=True, exist_ok=True)
@@ -50,7 +50,7 @@ def capture_and_describe(question: str, client) -> str:
     # Encode as JPEG. detail="low" in the API caps at 512 px anyway, so quality 75 is fine.
     ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 75])
     if not ok or buf is None:
-        return "Kuvan koodaus epäonnistui."
+        return "En näe juuri nyt."
     b64 = base64.b64encode(buf.tobytes()).decode()
 
     # Identity is resolved by dlib face_recognition — Vision model must NOT re-verify it.
@@ -96,4 +96,4 @@ def capture_and_describe(question: str, client) -> str:
         print(f"[Vision] API error: {exc}", file=sys.stderr)
         if names:
             return "Huoneessa on: " + ", ".join(names) + "."
-        return "En pystynyt analysoimaan kuvaa."
+        return "En pystynyt tulkitsemaan kuvaa."

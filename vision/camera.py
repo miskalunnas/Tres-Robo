@@ -21,6 +21,54 @@ def _opencv_camera_index() -> int:
         return 0
 
 
+def _try_gstreamer_libcamera() -> "cv2.VideoCapture | None":
+    """Pi Camera Module 2 via GStreamer+libcamera when picamera2 not installed. Returns None if not available."""
+    import cv2  # type: ignore[import]
+
+    # Only on Linux (Pi); GStreamer pipeline needs libcamerasrc
+    if sys.platform != "linux":
+        return None
+    pipeline = (
+        "libcamerasrc ! video/x-raw,width=640,height=480,framerate=10/1 ! "
+        "videoconvert ! video/x-raw,format=BGR ! appsink"
+    )
+    try:
+        cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
+        if cap.isOpened():
+            ret, _ = cap.read()
+            if ret:
+                return cap
+            cap.release()
+    except Exception:
+        pass
+    return None
+
+
+def _find_working_camera() -> "tuple[cv2.VideoCapture, str]":
+    """Kokeilee: GStreamer+libcamera (Pi), sitten OpenCV indeksit 0,1,2. Returns (cap, backend)."""
+    import cv2  # type: ignore[import]
+
+    cap = _try_gstreamer_libcamera()
+    if cap is not None:
+        return cap, "gstreamer"
+
+    preferred = _opencv_camera_index()
+    indices = [preferred] + [i for i in (0, 1, 2) if i != preferred]
+    for idx in indices:
+        cap = cv2.VideoCapture(idx)
+        if cap.isOpened():
+            ret, _ = cap.read()
+            if ret:
+                return cap, "opencv"
+            cap.release()
+    raise RuntimeError(
+        f"No working camera at indices {indices}. "
+        "On Raspberry Pi with Pi Camera Module 2: sudo apt install -y python3-picamera2, or "
+        "sudo apt install gstreamer1.0-tools gstreamer1.0-plugins-good libcamera0. "
+        "For USB webcam: set CV2_CAMERA_INDEX=0 or 1 in .env."
+    )
+
+
 class Camera:
     """Context manager that keeps the camera open for multiple captures.
 
@@ -86,22 +134,18 @@ class Camera:
             self._open_opencv()
 
     def _open_opencv(self) -> None:
-        import cv2  # type: ignore[import]
-
-        index = _opencv_camera_index()
-        cap = cv2.VideoCapture(index)
-        if not cap.isOpened():
-            raise RuntimeError(
-                f"No camera found at index {index}. "
-                "Try CV2_CAMERA_INDEX=1 in .env, or connect a USB webcam."
-            )
+        cap, backend = _find_working_camera()
         time.sleep(self._warmup)
         # Discard first frames — many USB webcams return invalid/black frames until warmed up.
         for _ in range(5):
             cap.read()
         self._cap = cap
-        self._backend = "opencv"
-        print(f"[Camera] Using OpenCV USB webcam (dev fallback only; intended: Pi Camera Module 2, index={index})")
+        self._backend = "opencv"  # both gstreamer and opencv use cap.read()
+        if backend == "gstreamer":
+            print("[Camera] Using GStreamer+libcamera (Pi Camera Module 2, picamera2 not installed)")
+        else:
+            idx = _opencv_camera_index()
+            print(f"[Camera] Using OpenCV USB webcam (dev fallback; intended: Pi Camera Module 2, index={idx})")
 
     def _close(self) -> None:
         if self._cam is not None:

@@ -199,7 +199,7 @@ class Brain:
             )
         except Exception as exc:
             print(f"[Brain] API error: {exc}")
-            return "Sorry, I couldn't reach my brain right now."
+            return "En kuullut oikein."
 
         print(f"[Timing] LLM: {time.monotonic()-t0:.2f}s")
         reply = response.choices[0].message.content or ""
@@ -231,7 +231,7 @@ class Brain:
             )
         except Exception as exc:
             print(f"[Brain] API error: {exc}")
-            return "Sorry, I couldn't reach my brain right now.", []
+            return "En kuullut oikein.", []
 
         print(f"[Timing] LLM with tools: {time.monotonic()-t0:.2f}s")
         msg = response.choices[0].message
@@ -283,7 +283,7 @@ class Brain:
             )
         except Exception as exc:
             print(f"[Brain] Streaming API error: {exc}")
-            yield "Sorry, I couldn't reach my brain right now."
+            yield "En kuullut oikein."
             return
 
         buffer = ""
@@ -325,7 +325,7 @@ class Brain:
         except Exception as exc:
             print(f"[Brain] Streaming interrupted: {exc}")
             if not emitted_parts:
-                yield "Sorry, I lost my train of thought."
+                yield "No niin."
         finally:
             print(f"[Timing] LLM stream with tools: {time.monotonic()-t0:.2f}s")
 
@@ -377,7 +377,7 @@ class Brain:
             )
         except Exception as exc:
             print(f"[Brain] Streaming API error: {exc}")
-            yield "Sorry, I couldn't reach my brain right now."
+            yield "En kuullut oikein."
             return
 
         buffer = ""
@@ -403,7 +403,7 @@ class Brain:
         except Exception as exc:
             print(f"[Brain] Streaming interrupted: {exc}")
             if not emitted_parts:
-                yield "Sorry, I lost my train of thought."
+                yield "No niin."
             return
         finally:
             print(f"[Timing] LLM stream: {time.monotonic()-t0:.2f}s")

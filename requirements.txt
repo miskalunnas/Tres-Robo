@@ -15,7 +15,7 @@ elevenlabs
 # Audio
 noisereduce
 
-# Vision (Pi Camera Module 2 = picamera2 via apt; OpenCV = USB fallback)
+# Vision: opencv-python for USB webcam fallback. Pi Camera Module 2 requires picamera2 (apt, not pip): sudo apt install python3-picamera2
 opencv-python
 
 # Music

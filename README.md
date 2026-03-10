@@ -90,6 +90,16 @@ For a 4-mic array (e.g. ReSpeaker), set in `.env`:
 - **MIC_CHANNELS**: `1` = single processed channel (default), `4` = raw 4-channel (mixed to mono).
 - **MIC_SAMPLE_RATE**: Device sample rate (e.g. `16000`). Leave unset to auto-detect; ReSpeaker 4-mic often needs 16 kHz.
 - **USE_DENOISER**: `0` or `false` if the array already does noise suppression.
+
+### Vision (see tool)
+
+The bot can answer visual questions ("mitä näet?", "kuka siellä on?") using the camera.
+
+- **Pi Camera Module 2 (CSI):** Preferred: `sudo apt install -y python3-picamera2`. Enable the camera in `raspi-config` → Interface Options → Camera.
+- **Pi Camera without picamera2:** If picamera2 is not installed, the code tries GStreamer+libcamera: `sudo apt install gstreamer1.0-tools gstreamer1.0-plugins-good libcamera0`.
+- **USB webcam:** Falls back to OpenCV (indices 0, 1, 2). Set `CV2_CAMERA_INDEX=0` or `1` in `.env` if the default fails.
+
+Test the vision pipeline: `python -m vision.test_see_tool`
   
 ## Next steps
 

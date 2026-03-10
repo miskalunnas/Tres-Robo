@@ -40,7 +40,7 @@ def main() -> None:
     print(f"[test_see_tool] Calling capture_and_describe(question={question!r}, client={'real' if args.real_api else 'mock'})...")
     result = capture_and_describe(question, client)
     print(f"[test_see_tool] Result: {result!r}")
-    if not result or "En saanut" in result or "puuttuu" in result or "epäonnistui" in result or "En pystynyt" in result:
+    if not result or "En saanut" in result or "puuttuu" in result or "epäonnistui" in result or "En pystynyt" in result or "En näe juuri" in result or "Silmät eivät toimi" in result:
         print("[test_see_tool] FAIL: got error message.", file=sys.stderr)
         sys.exit(1)
     print("[test_see_tool] OK: see tool returned a description.")
