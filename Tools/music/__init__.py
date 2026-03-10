@@ -12,6 +12,7 @@ Requirements:
 
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -111,9 +112,30 @@ class MusicPlayer:
     # ------------------------------------------------------------------
 
     @staticmethod
+    def _is_genre_like(query: str) -> bool:
+        """True jos query on genre/tyyli — etsitään genren mukaan biisi, ei sananmukaisesti."""
+        q = query.lower().strip()
+        if not q or len(q) > 40:
+            return False
+        genre_words = (
+            "jazz", "chill", "lo-fi", "lofi", "hip hop", "hiphop", "rap", "rock", "pop",
+            "classical", "klassinen", "rauhallinen", "rauhallista", "rento", "taustamusiikki", "background",
+            "ambient", "electronic", "elektroninen", "house", "techno", "reggae", "blues",
+            "metal", "punk", "indie", "folk", "acoustic", "akustinen", "piano", "guitar",
+            "focus", "concentration", "study", "työskentely", "työmusiikki",
+        )
+        words = set(re.split(r"[\s\-]+", q))
+        return any(g in q or g in words for g in genre_words)
+
+    @staticmethod
     def _resolve_url(query: str) -> str | None:
         """Use yt-dlp to turn a search query into a direct audio URL. Retries with fallback if first attempt fails."""
-        for attempt, search_query in enumerate([query, f"{query} music", "lofi hip hop radio"]):
+        # Genre/tyyli: etsi "jazz music" tms., ei pelkkä "jazz" (voi antaa huonon tuloksen)
+        if MusicPlayer._is_genre_like(query):
+            search_attempts = [f"{query} music", f"{query} mix", query, "lofi hip hop radio"]
+        else:
+            search_attempts = [query, f"{query} music", "lofi hip hop radio"]
+        for attempt, search_query in enumerate(search_attempts):
             cmd = [
                 sys.executable, "-m", "yt_dlp",
                 "-g", "-f", "bestaudio/best",

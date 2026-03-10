@@ -16,6 +16,7 @@ from memory import MemoryStore
 load_dotenv()
 
 MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+DISABLE_VISION = os.getenv("DISABLE_VISION", "").strip().lower() in ("1", "true", "yes", "on")
 
 _PROMPT_FILE = os.path.join(os.path.dirname(__file__), "system_prompt.txt")
 with open(_PROMPT_FILE, encoding="utf-8") as _f:
@@ -27,13 +28,17 @@ LLM_TOOLS = [
         "type": "function",
         "function": {
             "name": "play_music",
-            "description": "Soita musiikkia. Käytä VAIN kun käyttäjä selvästi pyytää soittamaan: 'soita jazz', 'laitetaan jotain rauhallista', 'taustamusiikkia', 'play chill'. ÄLÄ käytä kun käyttäjä vain mainitsee musiikin tai kysyy — vain kun pyytää soittamaan.",
+            "description": (
+                "Soita musiikkia. Käytä kun käyttäjä pyytää soittamaan: 'soita jazz', 'laitetaan chill', 'play lo-fi', 'taustamusiikkia'."
+                " Query = HAKUSANA jolla etsitään biisi YouTubesta. Genren/tyylin kohdalla käytä esim. 'jazz music', 'chill music' — EI pelkkää 'jazz' (etsii genren joukosta biisin)."
+                " Artistilla/biisillä: 'Beatles', 'Bohemian Rhapsody'. Älä toista käyttäjän sanoja — kutsu työkalu ja anna search-query."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "Hakusana: chill, jazz, lo-fi, rauhallinen, taustamusiikki, artistin nimi, biisin nimi.",
+                        "description": "YouTube-hakusana: genre (jazz music, chill music, lo-fi), artisti tai biisin nimi.",
                     }
                 },
                 "required": ["query"],
@@ -168,6 +173,14 @@ LLM_TOOLS = [
 ]
 
 
+def _get_llm_tools() -> list:
+    """Tools for LLM; excludes see when DISABLE_VISION=1 (ei kameraa)."""
+    tools = LLM_TOOLS
+    if DISABLE_VISION:
+        tools = [t for t in tools if t.get("function", {}).get("name") != "see"]
+    return tools
+
+
 class Brain:
     def __init__(self, store: MemoryStore | None = None) -> None:
         self._client = OpenAI(
@@ -178,6 +191,8 @@ class Brain:
         self._startup_context: str = ""
         self._reset_history()
         print(f"[Brain] Using model: {MODEL}")
+        if DISABLE_VISION:
+            print("[Brain] Vision disabled (DISABLE_VISION=1, no camera)")
 
     def think(
         self,
@@ -225,7 +240,7 @@ class Brain:
             response = self._client.chat.completions.create(
                 model=MODEL,
                 messages=messages,
-                tools=LLM_TOOLS,
+                tools=_get_llm_tools(),
                 tool_choice="auto",
                 timeout=30,
             )
@@ -276,7 +291,7 @@ class Brain:
             stream = self._client.chat.completions.create(
                 model=MODEL,
                 messages=messages,
-                tools=LLM_TOOLS,
+                tools=_get_llm_tools(),
                 tool_choice="auto",
                 timeout=30,
                 stream=True,
@@ -523,6 +538,11 @@ class Brain:
                 lang_rule = f"KRIITTINEN: Käyttäjä puhuu {ld}. Vastaa luonnollisella kielellä. Älä vaihda toiselle kielelle tai sekoita kieliä."
             messages.append({"role": "system", "content": lang_rule})
         messages.append({"role": "system", "content": SYSTEM_PROMPT})
+        if DISABLE_VISION:
+            messages.append({
+                "role": "system",
+                "content": "Sinulla ei ole kameraa. Kun käyttäjä kysyy mitä näet, kuka siellä on tai vastaavaa, sano lyhyesti että sinulla ei ole silmiä tässä asennuksessa.",
+            })
         if self._startup_context:
             messages.append({"role": "system", "content": f"Aloituskuva (kamera sessioalussa): {self._startup_context}"})
         prev_summary = self._store.get_previous_session_summary(

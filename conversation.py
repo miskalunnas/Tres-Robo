@@ -298,6 +298,10 @@ class ConversationEngine:
 
     def _run_startup_vision(self, ready_event: threading.Event) -> None:
         """Capture a frame at session start to identify who's in the room."""
+        import os
+        if os.getenv("DISABLE_VISION", "").strip().lower() in ("1", "true", "yes", "on"):
+            ready_event.set()
+            return
         try:
             from vision.camera import Camera
             from vision.identity_manager import FaceManager
