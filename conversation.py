@@ -58,15 +58,20 @@ from Tools.commands import parse_command
 from voice.tts import SpeechHandle, interrupt as interrupt_speech, speak
 
 # Pidemmät ensin — "hei bot" ennen "bot" jotta remainder = "mikä kello on"
+# Whisper-virheet: "bot" → "both" taustamusiikin takia
 WAKE_WORDS = [
     "hei bot",
     "hei botti",
+    "hei both",
     "hei robot",
     "hei robotti",
     "kuule bot",
     "kuule botti",
+    "kuule both",
     "hey bot",
+    "hey both",
     "hi bot",
+    "hi both",
     "listen bot",
     "founderbot",
     "founder bot",
@@ -88,6 +93,17 @@ def _normalize_for_wake(text: str) -> str:
     s = re.sub(r"[,.!?:;]+", " ", s)
     s = re.sub(r"\s+", " ", s)
     return s.strip()
+
+
+def _lenient_wake_match(text: str) -> str | None:
+    """Musiikin soidessa: 'hei' + 'bot' erikseen riittää (Whisper voi pilkkoa/epäselvästi)."""
+    n = _normalize_for_wake(text)
+    words = set(re.findall(r"\b[a-zäö]+\b", n))
+    greets = {"hei", "hey", "hi", "kuule"}
+    bots = {"bot", "botti", "both", "robot", "robotti"}
+    if (words & greets) and (words & bots):
+        return "hei bot"  # Yhteinen remainder-logiikka
+    return None
 SESSION_END_PATTERNS = (
     re.compile(r"\b(?:goodbye|bye(?: bye)?|näkemiin|hei hei|moi moi)\b"),
     re.compile(
@@ -204,6 +220,14 @@ class ConversationEngine:
                             return
                 except Exception:
                     pass
+                if not matched_wake_word:
+                    # Musiikki soi: lenient "hei" + "bot" erikseen
+                    try:
+                        from Tools.music import is_playing
+                        if is_playing():
+                            matched_wake_word = _lenient_wake_match(text)
+                    except Exception:
+                        pass
                 if not matched_wake_word:
                     return
                 remainder = self._strip_phrase(text, matched_wake_word)

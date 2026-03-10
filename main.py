@@ -17,7 +17,7 @@ try:
 except Exception:  # noqa: BLE001
     nr = None
 
-from conversation import ConversationEngine, WAKE_WORDS
+from conversation import ConversationEngine, WAKE_WORDS, _lenient_wake_match
 from Tools.commands import parse_command
 from voice.tts import is_busy
 
@@ -46,6 +46,9 @@ MAX_SEGMENT_SECONDS = 8.0
 # OFFLINE: herätys helppo — lyhyet "hei bot" pääsevät läpi nopeasti.
 MIN_SEGMENT_WHEN_OFFLINE = 0.25
 MAX_SILENCE_WHEN_OFFLINE = 0.6  # Lyhyempi hiljaisuus = herätys nopeampi (0.9 normaalisti)
+# OFFLINE + musiikki: vielä helpompi herätä (musiikki peittää puheen)
+MIN_SEGMENT_WHEN_OFFLINE_AND_MUSIC = 0.2
+MAX_SILENCE_WHEN_OFFLINE_AND_MUSIC = 0.5
 # ONLINE + musiikki: korkeampi kynnys = botti ei keskeytä musiikkia lyhyellä puheella.
 MIN_SEGMENT_WHEN_MUSIC_PLAYING = 2.2
 # Hiljaisuus ennen kuin lähetetään Whisperille: isompi = botti ei puhu päälle, pienempi = nopeampi vastaus.
@@ -70,7 +73,7 @@ WHISPER_MODEL = "small"
 # Whisper: herätyssanat ensin. FI + EN fraasit tasapainottavat kielitunnistusta.
 # Genret ja paikat: Whisper tunnistaa usein väärin — prompt auttaa (jazz ei jas, seuraava ei seuraa).
 WHISPER_PROMPT = (
-    "Hei bot, hei botti, kuule bot, kuule botti, hey bot, hi bot, listen bot. "
+    "Hei bot, hei botti, hei both, kuule bot, kuule botti, kuule both, hey bot, hey both, hi bot, hi both, listen bot. "
     "Founderbot, founder bot. "
     "Play, skip, pause, resume, stop, queue, volume up, volume down. "
     "Soita, tauko, jatka, lopeta, seuraava, kovempaa, hiljempaa. "
@@ -249,6 +252,8 @@ def _should_accept_while_music_playing(text: str) -> bool:
     for w in WAKE_WORDS:
         if w in normalized:
             return True
+    if _lenient_wake_match(text):
+        return True
     cmd = parse_command(text)
     if cmd:
         action = cmd.get("action", "")
@@ -453,20 +458,28 @@ def listen_forever() -> None:
                             offline = not engine.is_online()
                         except Exception:
                             offline = False
+                        offline_and_music = False
+                        if offline:
+                            try:
+                                from Tools.music import is_playing
+                                offline_and_music = is_playing()
+                            except Exception:
+                                pass
                         max_silence = (
                             INTERRUPT_MAX_SILENCE_BETWEEN_SPEECH_SECONDS
                             if capture_mode == "interrupt"
-                            else (MAX_SILENCE_WHEN_OFFLINE if offline else MAX_SILENCE_BETWEEN_SPEECH_SECONDS)
+                            else (MAX_SILENCE_WHEN_OFFLINE_AND_MUSIC if offline_and_music else (MAX_SILENCE_WHEN_OFFLINE if offline else MAX_SILENCE_BETWEEN_SPEECH_SECONDS))
                         )
                         if capture_mode == "interrupt":
                             min_segment = INTERRUPT_MIN_SEGMENT_SECONDS
                         else:
                             try:
                                 from Tools.music import is_playing
-                                if is_playing() and engine.is_online():
+                                music_on = is_playing()
+                                if music_on and engine.is_online():
                                     min_segment = MIN_SEGMENT_WHEN_MUSIC_PLAYING
                                 elif not engine.is_online():
-                                    min_segment = MIN_SEGMENT_WHEN_OFFLINE
+                                    min_segment = MIN_SEGMENT_WHEN_OFFLINE_AND_MUSIC if music_on else MIN_SEGMENT_WHEN_OFFLINE
                                 else:
                                     min_segment = MIN_SEGMENT_SECONDS
                             except Exception:
