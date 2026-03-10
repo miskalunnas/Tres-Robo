@@ -1,8 +1,12 @@
+import os
 import queue
 import sys
 import threading
 import time
 from dataclasses import dataclass
+
+from dotenv import load_dotenv
+load_dotenv()
 
 import numpy as np
 import sounddevice as sd
@@ -54,7 +58,9 @@ INTERRUPT_MAX_SILENCE_BETWEEN_SPEECH_SECONDS = 0.5
 MUSIC_UNDUCK_SILENCE_SECONDS = 2.5
 
 # Kauempaa puhuttaessa taustamelu voi peittää puheen — denoiser auttaa.
-USE_DENOISER = True
+# 4-array käsitellyllä 1ch:lla voi olla USE_DENOISER=0 (laitteen NS riittää).
+_use_denoiser = os.environ.get("USE_DENOISER", "1").strip().lower()
+USE_DENOISER = _use_denoiser in ("1", "true", "yes", "on")
 
 # Whisper model: "tiny" = nopein, "base" = nopea kompromissi, "small"/"medium" = tarkempi suomeen.
 WHISPER_MODEL = "small"
@@ -135,7 +141,7 @@ def _prepare_audio(frames: list[np.ndarray], native_sr: int) -> np.ndarray:
     """Concatenate frames, resample to 16 kHz, optionally denoise, normalize. Returns mono float32."""
     audio = np.concatenate(frames, axis=0)
     if audio.ndim > 1:
-        audio = audio[:, 0]
+        audio = audio.mean(axis=1)  # multi-channel → mono keskiarvo
     audio = resample(audio, native_sr, VAD_SAMPLE_RATE)
     if USE_DENOISER and nr is not None:
         try:
@@ -271,12 +277,19 @@ def _dialogue_worker(engine: ConversationEngine) -> None:
 
 
 def listen_forever() -> None:
-    # MIC_DEVICE: ALSA device string or sounddevice index for the USB mic.
-    # PortAudio sometimes misreports USB capture devices as 0 input channels
-    # even when arecord confirms they work. Using the ALSA hw string bypasses this.
-    MIC_DEVICE = "hw:2,0"
-    native_sr = 48_000  # confirmed via sd.query_devices()
-    print(f"[Mic] {MIC_DEVICE} — native {native_sr} Hz, VAD/STT at {VAD_SAMPLE_RATE} Hz")
+    # Mikki: MIC_DEVICE (ALSA hw:X,Y tai PortAudio-indeksi), MIC_CHANNELS (1/4),
+    # MIC_SAMPLE_RATE (esim. 16000), USE_DENOISER (0/1). Katso README "4-array microphone".
+    _dev = os.environ.get("MIC_DEVICE", "hw:2,0").strip()
+    MIC_DEVICE = int(_dev) if _dev.isdigit() else _dev if _dev else None
+
+    # MIC_CHANNELS: 1 = mono/käsitelty, 4 = 4-array raaka → keskiarvo monoksi.
+    MIC_CHANNELS = int(os.environ.get("MIC_CHANNELS", "1"))
+
+    # MIC_SAMPLE_RATE: laitteen sample rate. Jos 16000, ei resamplea VAD:lle.
+    _sr = os.environ.get("MIC_SAMPLE_RATE", "").strip()
+    native_sr = int(_sr) if _sr.isdigit() else 48_000
+
+    print(f"[Mic] device={MIC_DEVICE} channels={MIC_CHANNELS} {native_sr} Hz, VAD/STT at {VAD_SAMPLE_RATE} Hz")
 
     if USE_CLOUD_STT:
         print("[STT] Using OpenAI Whisper (cloud). Set OPENAI_API_KEY in .env")
@@ -328,7 +341,7 @@ def listen_forever() -> None:
         blocksize=capture_block,
         device=MIC_DEVICE,
         dtype="float32",
-        channels=1,
+        channels=MIC_CHANNELS,
         callback=audio_callback,
     ):
         print(f"[Engine] OFFLINE. Say 'founderbot', 'hei bot' or 'kuule bot' to wake me up.")
@@ -347,8 +360,11 @@ def listen_forever() -> None:
                     silence_duration = 0.0
                     capture_mode = current_mode
 
-                # Mono
-                mono = chunk[:, 0] if chunk.ndim > 1 else chunk
+                # Mono: 1ch = [:,0], multi-channel = keskiarvo
+                if chunk.ndim > 1:
+                    mono = chunk.mean(axis=1) if MIC_CHANNELS > 1 else chunk[:, 0]
+                else:
+                    mono = chunk
 
                 # Resample chunk to 16 kHz for VAD
                 mono_16k = resample(mono, native_sr, VAD_SAMPLE_RATE)
