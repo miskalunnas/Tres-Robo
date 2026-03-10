@@ -1,9 +1,10 @@
-"""Text-to-speech output via ElevenLabs.
+"""Text-to-speech: Google Translate (gTTS) tai ElevenLabs.
 
-Falls back to a print stub if the API key is not set.
-Audio is played through the system default output (Bluetooth speaker).
+Oletus: Google (ilmainen, ei API-avainta). Vaihda TTS_PROVIDER=elevenlabs + ELEVENLABS_API_KEY.
+Audio toistetaan järjestelmän oletuslähtöön (esim. Bluetooth-kaiutin).
 """
 
+import io
 import os
 import queue
 import subprocess
@@ -16,11 +17,41 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+TTS_PROVIDER = os.getenv("TTS_PROVIDER", "google").strip().lower()
 _ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "")
 _VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "")
 
-# Lazy-load the ElevenLabs client only when needed.
+# Lazy-load ElevenLabs client only when needed.
 _client = None
+
+
+def _infer_tts_lang(text: str) -> str:
+    """Yksinkertainen arvio: ä/ö → suomi, muuten englanti."""
+    if not text or len(text) < 2:
+        return "fi"
+    t = text.lower()
+    if "ä" in t or "ö" in t:
+        return "fi"
+    # Englanninkieliset yleissanat
+    en_words = {"the", "a", "an", "is", "are", "was", "were", "to", "of", "in", "on", "and", "or", "but"}
+    words = set(t.split())
+    if len(words & en_words) >= 2:
+        return "en"
+    return "fi"
+
+
+def _get_playback_cmd() -> list[str] | None:
+    """Palauttaa komennon joka lukee MP3 stdinistä. mpg123, ffplay tai mpv."""
+    import shutil
+    for cmd in ("mpg123", "ffplay", "mpv"):
+        if shutil.which(cmd):
+            if cmd == "mpg123":
+                return ["mpg123", "-o", "pulse", "-q", "-"]
+            if cmd == "ffplay":
+                return ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet", "-i", "pipe:0"]
+            if cmd == "mpv":
+                return ["mpv", "--no-video", "--really-quiet", "-"]
+    return None
 
 
 class SpeechHandle:
@@ -141,23 +172,87 @@ class _TTSPlayer:
                 self._queue.task_done()
 
     def _play_text(self, text: str) -> bool:
-        if not _ELEVENLABS_API_KEY or not _VOICE_ID:
-            return False
+        if TTS_PROVIDER == "google":
+            return self._play_google(text)
+        return self._play_elevenlabs(text)
 
-        client = _get_client()
-        if client is None:
+    def _play_google(self, text: str) -> bool:
+        """Google Translate TTS (gTTS) — ilmainen, ei API-avainta."""
+        try:
+            from gtts import gTTS
+        except ImportError:
+            print("[TTS] gTTS not installed. Run: pip install gTTS", file=sys.stderr)
             return False
-
         interrupted = False
         try:
             t0 = time.monotonic()
-            # Use streaming API so we get first audio bytes earlier (lower latency).
+            lang = _infer_tts_lang(text)
+            buf = io.BytesIO()
+            tts = gTTS(text=text, lang=lang)
+            tts.write_to_fp(buf)
+            mp3_bytes = buf.getvalue()
+            if not mp3_bytes:
+                return False
+            print(f"[Timing] TTS Google ({lang}): {time.monotonic()-t0:.2f}s")
+            playback_cmd = _get_playback_cmd()
+            if not playback_cmd:
+                print("[TTS] No player (mpg123, ffplay or mpv). Install: sudo apt install mpg123", file=sys.stderr)
+                return False
+            proc = subprocess.Popen(
+                playback_cmd,
+                stdin=subprocess.PIPE,
+            )
+            with self._lock:
+                self._current_proc = proc
+            try:
+                proc.stdin.write(mp3_bytes)
+            except (BrokenPipeError, OSError):
+                interrupted = True
+            if proc.stdin is not None:
+                try:
+                    proc.stdin.close()
+                except OSError:
+                    interrupted = interrupted or True
+            if not self._was_interrupted():
+                proc.wait()
+            else:
+                interrupted = True
+                try:
+                    proc.terminate()
+                    proc.wait()
+                except Exception:
+                    pass
+            print(f"[Timing] TTS playback: {time.monotonic()-t0:.2f}s")
+        except Exception as exc:
+            print(f"[TTS] Google TTS error: {exc}", file=sys.stderr)
+            interrupted = interrupted or self._was_interrupted()
+        finally:
+            with self._lock:
+                interrupted = interrupted or self._interrupt_requested
+                self._current_proc = None
+                self._interrupt_requested = False
+        return interrupted
+
+    def _play_elevenlabs(self, text: str) -> bool:
+        """ElevenLabs TTS — vaatii ELEVENLABS_API_KEY ja ELEVENLABS_VOICE_ID."""
+        if not _ELEVENLABS_API_KEY or not _VOICE_ID:
+            print("[TTS] ElevenLabs: set ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID in .env", file=sys.stderr)
+            return False
+        client = _get_client()
+        if client is None:
+            return False
+        interrupted = False
+        try:
+            t0 = time.monotonic()
             audio_stream = _get_audio_stream(client, text)
             if audio_stream is None:
                 return False
-            # Start mpg123 and feed chunks as they arrive.
+            playback_cmd = _get_playback_cmd()
+            if not playback_cmd:
+                print("[TTS] No player (mpg123, ffplay or mpv). Install: sudo apt install mpg123", file=sys.stderr)
+                return False
             proc = subprocess.Popen(
-                ["mpg123", "-o", "pulse", "-q", "-"],
+                playback_cmd,
                 stdin=subprocess.PIPE,
             )
             with self._lock:
@@ -172,10 +267,7 @@ class _TTSPlayer:
                     first_chunk = False
                 if proc.stdin is None:
                     break
-                if isinstance(chunk, bytes):
-                    data = chunk
-                else:
-                    data = bytes(chunk) if not isinstance(chunk, str) else chunk.encode()
+                data = bytes(chunk) if not isinstance(chunk, (bytes, bytearray)) else chunk
                 if not data:
                     continue
                 try:
@@ -255,6 +347,11 @@ def _get_audio_stream(client, text: str):
 
 
 _player = _TTSPlayer()
+
+if TTS_PROVIDER == "google":
+    print("[TTS] Using Google Translate (gTTS)")
+else:
+    print("[TTS] Using ElevenLabs (set TTS_PROVIDER=google for free Google TTS)")
 
 
 def speak(text: str, *, block: bool = False) -> SpeechHandle:

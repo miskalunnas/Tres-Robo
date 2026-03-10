@@ -87,8 +87,9 @@ SESSION_END_PATTERNS = (
     re.compile(
         r"\b(?:go offline|go idle|go to sleep|sleep now|stop listening|you can stop listening|you can sleep|you can go to sleep)\b"
     ),
+    # Nukkumaan / lepotila: botti menee sleep-tilaan, ei reagoi ennen herätyssanaa
     re.compile(
-        r"\b(?:mene lepotilaan|siirry lepotilaan|mene nukkumaan|voit mennä nukkumaan|voit mennä lepotilaan)\b"
+        r"\b(?:mene lepotilaan|siirry lepotilaan|mene nukkumaan|voit mennä nukkumaan|voit mennä lepotilaan|mennä nukkumaan|nuku nyt|mene nukkumaan nyt|lepotila|mene lepoon)\b"
     ),
     # Lepotila: "ole hiljaa", "älä puhu" jne.
     re.compile(
@@ -367,7 +368,11 @@ class ConversationEngine:
         self._log_user_message(text)
 
         if self._is_session_end_intent(text):
-            bye_msg = {"en": "Okay, going offline.", "fi": "Hei hei!"}.get(language, "Hei hei!")
+            # Sleep/lepotila: erillinen vastaus
+            if self._is_sleep_intent(text):
+                bye_msg = {"en": "Going to sleep. Wake me when you need me.", "fi": "Menen lepoon. Herätä kun tarvitset."}.get(language, "Menen lepoon.")
+            else:
+                bye_msg = {"en": "Okay, going offline.", "fi": "Hei hei!"}.get(language, "Hei hei!")
             self._speak_reply(bye_msg, end_session_reason="goodbye")
             return
 
@@ -631,6 +636,17 @@ class ConversationEngine:
         if "stop listening to" in normalized:
             return False
         return any(pattern.search(normalized) for pattern in SESSION_END_PATTERNS)
+
+    def _is_sleep_intent(self, text: str) -> bool:
+        """True jos käyttäjä haluaa botin mennä nukkumaan / sleep-tilaan."""
+        normalized = self._normalize_intent_text(text)
+        if not normalized:
+            return False
+        sleep_patterns = (
+            r"\b(?:mene nukkumaan|mennä nukkumaan|nuku nyt|mene lepoon|lepotila|mene lepotilaan|siirry lepotilaan)\b",
+            r"\b(?:go to sleep|sleep now|you can sleep|take a nap)\b",
+        )
+        return any(re.search(p, normalized, re.I) for p in sleep_patterns)
 
     @staticmethod
     def _normalize_intent_text(text: str) -> str:

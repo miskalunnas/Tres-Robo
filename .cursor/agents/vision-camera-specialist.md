@@ -23,7 +23,7 @@ vision/identity_manager.py → FaceManager for face recognition (optional)
 ## Camera Detection Order
 
 1. **picamera2** (Pi Camera Module 2 via CSI) — preferred. Requires: `sudo apt install python3-picamera2`, camera enabled in raspi-config.
-2. **GStreamer + libcamera** — on Linux (Pi) when picamera2 fails. Uses libcamerasrc pipeline. Requires: `sudo apt install gstreamer1.0-tools gstreamer1.0-plugins-good libcamera0`.
+2. **GStreamer + libcamera** — on Linux (Pi) when picamera2 fails. Requires: `sudo apt install gstreamer1.0-libcamera gstreamer1.0-plugins-good`.
 3. **OpenCV** — fallback. Tries indices 0, 1, 2 (USB webcams). On Pi, OpenCV V4L2 often fails with libcamera; Pi Camera is NOT exposed as standard /dev/video0.
 
 ## When Invoked

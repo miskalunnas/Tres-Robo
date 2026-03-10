@@ -9,7 +9,8 @@ requests
 # STT: faster-whisper (local) tai voice/stt_openai (cloud)
 faster-whisper
 
-# TTS
+# TTS: gTTS (Google, oletus) tai elevenlabs
+gTTS
 elevenlabs
 
 # Audio

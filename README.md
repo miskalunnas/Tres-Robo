@@ -77,6 +77,12 @@ You should see something like:
   - **mpv**: `sudo apt install mpv`
 - `requirements.txt` already includes `yt-dlp`. The bot will say “I couldn’t start playback.” if no player is found or the search fails.
 
+### TTS (puhesynteesi)
+
+- **Oletus: Google Translate (gTTS)** — ilmainen, ei API-avainta. Asenna: `pip install gTTS`.
+- **ElevenLabs:** Aseta `.env`:ssä `TTS_PROVIDER=elevenlabs`, `ELEVENLABS_API_KEY` ja `ELEVENLABS_VOICE_ID`.
+- Toisto: mpg123, ffplay tai mpv (ensimmäinen löytyvä). Pi:llä `sudo apt install mpg123` tai `sudo apt install ffmpeg`.
+
 ### Noise handling
 
 - The microphone stream is filtered by **WebRTC VAD** (`webrtcvad`), which tries to keep only speech and drop pure noise.
@@ -96,7 +102,7 @@ For a 4-mic array (e.g. ReSpeaker), set in `.env`:
 The bot can answer visual questions ("mitä näet?", "kuka siellä on?") using the camera.
 
 - **Pi Camera Module 2 (CSI):** Preferred: `sudo apt install -y python3-picamera2`. Enable the camera in `raspi-config` → Interface Options → Camera.
-- **Pi Camera without picamera2:** If picamera2 is not installed, the code tries GStreamer+libcamera: `sudo apt install gstreamer1.0-tools gstreamer1.0-plugins-good libcamera0`.
+- **Pi Camera without picamera2:** If picamera2 is not installed, the code tries GStreamer+libcamera: `sudo apt install gstreamer1.0-libcamera gstreamer1.0-plugins-good`.
 - **USB webcam:** Falls back to OpenCV (indices 0, 1, 2). Set `CV2_CAMERA_INDEX=0` or `1` in `.env` if the default fails.
 
 Test the vision pipeline: `python -m vision.test_see_tool`

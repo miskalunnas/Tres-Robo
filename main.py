@@ -72,7 +72,7 @@ WHISPER_PROMPT = (
     "What time, tell me a joke, lunch menu, what's for lunch. "
     "Kello, vitsi, ruokalista, lounas, reaktori, newton. "
     "Hello, hi, hey, thanks, bye, goodbye. Moi, hei, moro, kiitos, näkemiin. "
-    "Lopetetaan, kiitos hei, selvä kiitos. That's all, see you later, going offline."
+    "Lopetetaan, kiitos hei, selvä kiitos. That's all, see you later, going offline. Mene nukkumaan, mennä nukkumaan, nuku nyt, lepotila, go to sleep, sleep now."
 )
 
 

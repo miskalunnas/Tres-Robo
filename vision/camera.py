@@ -8,6 +8,7 @@ and enable the camera (raspi-config → Interface Options → Camera).
 import os
 import sys
 import time
+from contextlib import contextmanager
 from types import TracebackType
 
 import numpy as np
@@ -25,23 +26,41 @@ def _try_gstreamer_libcamera() -> "cv2.VideoCapture | None":
     """Pi Camera Module 2 via GStreamer+libcamera when picamera2 not installed. Returns None if not available."""
     import cv2  # type: ignore[import]
 
-    # Only on Linux (Pi); GStreamer pipeline needs libcamerasrc
+    # Only on Linux (Pi); needs gstreamer1.0-libcamera
     if sys.platform != "linux":
         return None
-    pipeline = (
-        "libcamerasrc ! video/x-raw,width=640,height=480,framerate=10/1 ! "
-        "videoconvert ! video/x-raw,format=BGR ! appsink"
-    )
-    try:
-        cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
-        if cap.isOpened():
-            ret, _ = cap.read()
-            if ret:
-                return cap
-            cap.release()
-    except Exception:
-        pass
+    # Try pipelines in order; libcamerasrc format varies by Pi OS version
+    pipelines = [
+        "libcamerasrc ! video/x-raw,width=640,height=480 ! videoconvert ! video/x-raw,format=BGR ! appsink",
+        "libcamerasrc ! video/x-raw,width=640,height=480,framerate=15/1 ! videoconvert ! appsink",
+        "libcamerasrc ! video/x-raw,width=640,height=480 ! videoconvert ! appsink",
+    ]
+    for pipeline in pipelines:
+        try:
+            cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
+            if cap.isOpened():
+                ret, _ = cap.read()
+                if ret:
+                    return cap
+                cap.release()
+        except Exception:
+            pass
     return None
+
+
+@contextmanager
+def _suppress_stderr():
+    """Context manager: redirect stderr to devnull to silence OpenCV/V4L2/obsensor probe spam."""
+    stderr_fd = sys.stderr.fileno()
+    saved_fd = os.dup(stderr_fd)
+    devnull = os.open(os.devnull, os.O_WRONLY)
+    try:
+        os.dup2(devnull, stderr_fd)
+        yield
+    finally:
+        os.dup2(saved_fd, stderr_fd)
+        os.close(saved_fd)
+        os.close(devnull)
 
 
 def _find_working_camera() -> "tuple[cv2.VideoCapture, str]":
@@ -55,17 +74,18 @@ def _find_working_camera() -> "tuple[cv2.VideoCapture, str]":
     preferred = _opencv_camera_index()
     indices = [preferred] + [i for i in (0, 1, 2) if i != preferred]
     for idx in indices:
-        cap = cv2.VideoCapture(idx)
-        if cap.isOpened():
-            ret, _ = cap.read()
-            if ret:
-                return cap, "opencv"
-            cap.release()
+        with _suppress_stderr():
+            cap = cv2.VideoCapture(idx)
+            if cap.isOpened():
+                ret, _ = cap.read()
+                if ret:
+                    return cap, "opencv"
+                cap.release()
     raise RuntimeError(
         f"No working camera at indices {indices}. "
-        "On Raspberry Pi with Pi Camera Module 2: sudo apt install -y python3-picamera2, or "
-        "sudo apt install gstreamer1.0-tools gstreamer1.0-plugins-good libcamera0. "
-        "For USB webcam: set CV2_CAMERA_INDEX=0 or 1 in .env."
+        "On Raspberry Pi with Pi Camera Module 2: sudo apt install -y python3-picamera2 (recommended), or "
+        "sudo apt install gstreamer1.0-libcamera gstreamer1.0-plugins-good. "
+        "Enable camera: raspi-config → Interface Options → Camera."
     )
 
 
