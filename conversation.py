@@ -191,7 +191,14 @@ class ConversationEngine:
     def handle(self, text: str, now: float, *, language: str = "") -> None:
         """Called by main.py for every transcribed utterance."""
         with self._lock:
-            if self._online and (now - self._last_activity) >= INACTIVITY_TIMEOUT:
+            # Musiikin soidessa ei mene nukkumaan — musiikki = taustamelu, botti pysyy hereillä
+            skip_timeout = False
+            try:
+                from Tools.music import is_playing
+                skip_timeout = is_playing()
+            except Exception:
+                pass
+            if not skip_timeout and self._online and (now - self._last_activity) >= INACTIVITY_TIMEOUT:
                 print(
                     f"[Engine] No speech for {INACTIVITY_TIMEOUT:.0f}s — going OFFLINE."
                 )

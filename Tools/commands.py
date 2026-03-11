@@ -24,9 +24,7 @@ PLAY_PREFIXES = (
     "jotain musiikkia", "musiikkia", "vähän musiikkia", "vahan musiikkia",
     "play music", "play a song", "play song", "play some", "play me", "play a bit of",
     "play something", "play anything", "start some music", "start the music",
-    "i want to hear", "i want to listen to", "i wanna hear", "i wanna listen",
-    "let's listen to", "lets listen to", "can we listen to", "can you put on",
-    "can you play", "could you play", "could you put on", "would you play",
+    "can you put on", "could you play", "could you put on",
     "hit play", "turn on some music", "turn on the music",
 )
 # Ei pelkkä "play" tai "queue" — liian herkkä.
@@ -48,20 +46,20 @@ SKIP_KEYWORDS = (
     "skip this song", "skip this track", "skip this", "skip it", "skip to next",
     "skip song", "skip track", "change song", "change the song", "switch song",
     "play next", "go to next", "move to next", "on to the next",
-    "seuraava kappale", "seuraava biisi", "seuraava", "seuraavaksi",
+    "seuraava kappale", "seuraava biisi", "seuraavaksi",
     "vaihda biisi", "vaihda kappale", "toinen biisi", "toinen kappale", "uusi biisi",
     "ei tätä", "not this one", "not this song",
-    "skip", "next",
+    "skip",
 )
 PAUSE_KEYWORDS = (
     "pause music", "pause the music", "pause song", "pause the song",
-    "pause playback", "hold the music", "hold on", "freeze the music",
+    "pause playback", "hold the music", "freeze the music",
     "tauko", "pauseta", "pausetta", "pysäytä", "pysäytä musiikki", "pidä tauko",
     "pause",
 )
 RESUME_KEYWORDS = (
     "resume music", "resume the music", "resume song", "resume playback",
-    "continue playing", "continue the music", "keep playing", "continue",
+    "continue playing", "continue the music", "keep playing",
     "unpause", "un-pause", "play again", "start again", "start playing again",
     "jatka", "jatka musiikki", "jatka soitto", "jatka soittaminen",
     "alkaa soittaa", "soita taas", "soita uudestaan",
@@ -177,6 +175,10 @@ ACKNOWLEDGMENT_KEYWORDS = (
 import re
 from difflib import SequenceMatcher
 
+# Estää vääriä osumia: "don't stop" ≠ stop, "hold on a sec" ≠ pause
+_STOP_BLOCKLIST = re.compile(r"\b(?:don'?t|do\s+not)\s+stop\b", re.I)
+_PAUSE_BLOCKLIST = re.compile(r"\bhold\s+on\s+(?:a\s+)?(?:sec|moment|minute)\b", re.I)
+
 # Whisper-virheet: korjataan ennen parsintaa (esim. "jas" → "jazz").
 # Avain = väärin tunnistettu, arvo = oikea muoto. Käytetään word-boundary korvauksia.
 _WHISPER_CORRECTIONS: dict[str, str] = {
@@ -275,10 +277,12 @@ def parse_command(text: str) -> dict | None:
         return {"action": "music_skip", "response": "Skipping to next song."}
 
     if any(_word_match(kw, normalized) for kw in PAUSE_KEYWORDS) or _fuzzy_match_keywords(PAUSE_KEYWORDS, normalized):
-        return {"action": "music_pause", "response": "Tauko."}
+        if not _PAUSE_BLOCKLIST.search(text):
+            return {"action": "music_pause", "response": "Tauko."}
 
     if any(_word_match(kw, normalized) for kw in STOP_KEYWORDS) or _fuzzy_match_keywords(STOP_KEYWORDS, normalized):
-        return {"action": "music_stop", "response": "Lopetettu."}
+        if not _STOP_BLOCKLIST.search(text):
+            return {"action": "music_stop", "response": "Lopetettu."}
 
     # ── 3. Volume ─────────────────────────────────────────────────
 
