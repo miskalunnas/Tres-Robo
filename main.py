@@ -63,6 +63,29 @@ INTERRUPT_MAX_SILENCE_BETWEEN_SPEECH_SECONDS = 0.5
 # Musiikin ducking: hiljaisuuden kesto (s) puheen jälkeen ennen volyymin palautusta.
 MUSIC_UNDUCK_SILENCE_SECONDS = 2.5
 
+
+def _get_segment_params(
+    capture_mode: str,
+    offline: bool,
+    music_on: bool,
+) -> tuple[float, float]:
+    """Palauttaa (min_segment, max_silence) segmentointia varten."""
+    if capture_mode == "interrupt":
+        return (INTERRUPT_MIN_SEGMENT_SECONDS, INTERRUPT_MAX_SILENCE_BETWEEN_SPEECH_SECONDS)
+    # Normal mode
+    if offline:
+        max_silence = MAX_SILENCE_WHEN_OFFLINE_AND_MUSIC if music_on else MAX_SILENCE_WHEN_OFFLINE
+        min_segment = MIN_SEGMENT_WHEN_OFFLINE_AND_MUSIC if music_on else MIN_SEGMENT_WHEN_OFFLINE
+    else:
+        max_silence = MAX_SILENCE_BETWEEN_SPEECH_SECONDS
+        min_segment = (
+            MIN_SEGMENT_WHEN_MUSIC_PLAYING
+            if music_on
+            else MIN_SEGMENT_SECONDS
+        )
+    return (min_segment, max_silence)
+
+
 # Kauempaa puhuttaessa taustamelu voi peittää puheen — denoiser auttaa.
 # 4-array käsitellyllä 1ch:lla voi olla USE_DENOISER=0 (laitteen NS riittää).
 _use_denoiser = os.environ.get("USE_DENOISER", "1").strip().lower()
@@ -118,6 +141,25 @@ def _put_latest(q: queue.Queue, item) -> None:
                 q.get_nowait()
             except queue.Empty:
                 return
+
+
+# Lue kerran käynnistyksessä — ei env-lukua hotpathilla.
+WAKE_DEBUG = os.environ.get("WAKE_DEBUG", "").strip().lower() in ("1", "true", "yes")
+
+# Lazy music-moduuli: yksi importti, selkeä fallback.
+_music_module = None
+
+
+def _get_music():
+    """Palauttaa Tools.music-moduulin tai None jos ei käytettävissä."""
+    global _music_module
+    if _music_module is None:
+        try:
+            import Tools.music as _m
+            _music_module = _m
+        except Exception:
+            pass
+    return _music_module
 
 
 # Mikrofonivahvistus: kauempaa puhuttu puhe kuuluu paremmin (1.0 = ei vahvistusta).
@@ -217,7 +259,7 @@ def transcribe(
     audio = _prepare_audio(frames, native_sr)
     peak = np.abs(audio).max()
     if peak < 0.03:
-        if os.environ.get("WAKE_DEBUG", "").strip().lower() in ("1", "true", "yes"):
+        if WAKE_DEBUG:
             print(f"[Wake debug] Segment skipped: audio too quiet (peak={peak:.4f})", file=sys.stderr)
         return "", ""
     # 0.03–0.05: hiljainen mutta kokeile Whisper (lyhyet "hei bot" voivat olla hiljaisia)
@@ -230,10 +272,10 @@ def _transcription_worker(model, native_sr: int) -> None:
     while True:
         task = segment_queue.get()
         try:
-            if os.environ.get("WAKE_DEBUG", "").strip().lower() in ("1", "true", "yes"):
+            if WAKE_DEBUG:
                 print(f"[Wake debug] Segment → Whisper ({len(task.frames)} frames)", file=sys.stderr)
             text, lang = transcribe(model, task.frames, native_sr)
-            if os.environ.get("WAKE_DEBUG", "").strip().lower() in ("1", "true", "yes") and not text:
+            if WAKE_DEBUG and not text:
                 print(f"[Wake debug] Whisper palautti tyhjän", file=sys.stderr)
             if text:
                 _put_latest(
@@ -249,7 +291,7 @@ def _transcription_worker(model, native_sr: int) -> None:
             segment_queue.task_done()
 
 
-def _should_accept_while_music_playing(text: str) -> bool:
+def _should_accept_while_music_playing(text: str, *, parsed_cmd: dict | None = None) -> bool:
     """True if segment should be processed when music is playing (wake word or music command)."""
     import re
     if not text or not text.strip():
@@ -262,7 +304,7 @@ def _should_accept_while_music_playing(text: str) -> bool:
             return True
     if _lenient_wake_match(text):
         return True
-    cmd = parse_command(text)
+    cmd = parsed_cmd if parsed_cmd is not None else parse_command(text)
     if cmd:
         action = cmd.get("action", "")
         if action in (
@@ -277,27 +319,27 @@ def _dialogue_worker(engine: ConversationEngine) -> None:
     while True:
         utterance = utterance_queue.get()
         try:
+            parsed_cmd = parse_command(utterance.text) if utterance.text else None
             if utterance.interruption:
                 engine.handle_interruption(
                     utterance.text,
                     now=utterance.heard_at,
                     language=utterance.language,
+                    parsed_cmd=parsed_cmd,
                 )
             else:
                 # Musiikki soi + ONLINE: aktivoitu vain herätyssanalla tai musiikkikomennolla
-                try:
-                    from Tools.music import is_playing
-                    if is_playing() and engine.is_online():
-                        if not _should_accept_while_music_playing(utterance.text):
-                            preview = (utterance.text[:50] + "...") if len(utterance.text) > 50 else utterance.text
-                            print(f"[Music listening] Ignored (no wake/command): {preview}")
-                            continue
-                except Exception:
-                    pass
+                music = _get_music()
+                if music and music.is_playing() and engine.is_online():
+                    if not _should_accept_while_music_playing(utterance.text, parsed_cmd=parsed_cmd):
+                        preview = (utterance.text[:50] + "...") if len(utterance.text) > 50 else utterance.text
+                        print(f"[Music listening] Ignored (no wake/command): {preview}")
+                        continue
                 engine.handle(
                     utterance.text,
                     now=utterance.heard_at,
                     language=utterance.language,
+                    parsed_cmd=parsed_cmd,
                 )
         finally:
             utterance_queue.task_done()
@@ -434,13 +476,10 @@ def listen_forever() -> None:
                     last_speech_time = time.monotonic()
                     last_speech_or_send = last_speech_time
                     # Kun soittaa musiikkia ja puhutaan, pienennä volyymiä (ducking).
-                    try:
-                        from Tools.music import is_playing, duck
-                        if is_playing() and not music_ducked:
-                            duck()
-                            music_ducked = True
-                    except Exception:
-                        pass
+                    music = _get_music()
+                    if music and music.is_playing() and not music_ducked:
+                        music.duck()
+                        music_ducked = True
 
                     max_segment = (
                         INTERRUPT_MAX_SEGMENT_SECONDS
@@ -467,32 +506,11 @@ def listen_forever() -> None:
                             offline = not engine.is_online()
                         except Exception:
                             offline = False
-                        offline_and_music = False
-                        if offline:
-                            try:
-                                from Tools.music import is_playing
-                                offline_and_music = is_playing()
-                            except Exception:
-                                pass
-                        max_silence = (
-                            INTERRUPT_MAX_SILENCE_BETWEEN_SPEECH_SECONDS
-                            if capture_mode == "interrupt"
-                            else (MAX_SILENCE_WHEN_OFFLINE_AND_MUSIC if offline_and_music else (MAX_SILENCE_WHEN_OFFLINE if offline else MAX_SILENCE_BETWEEN_SPEECH_SECONDS))
-                        )
-                        if capture_mode == "interrupt":
-                            min_segment = INTERRUPT_MIN_SEGMENT_SECONDS
-                        else:
-                            try:
-                                from Tools.music import is_playing
-                                music_on = is_playing()
-                                if music_on and engine.is_online():
-                                    min_segment = MIN_SEGMENT_WHEN_MUSIC_PLAYING
-                                elif not engine.is_online():
-                                    min_segment = MIN_SEGMENT_WHEN_OFFLINE_AND_MUSIC if music_on else MIN_SEGMENT_WHEN_OFFLINE
-                                else:
-                                    min_segment = MIN_SEGMENT_SECONDS
-                            except Exception:
-                                min_segment = MIN_SEGMENT_SECONDS
+                        music_on = False
+                        music = _get_music()
+                        if music:
+                            music_on = music.is_playing()
+                        min_segment, max_silence = _get_segment_params(capture_mode, offline, music_on)
                         if silence_duration >= max_silence:
                             if segment_duration >= min_segment:
                                 _put_latest(
@@ -509,11 +527,12 @@ def listen_forever() -> None:
                             silence_duration = 0.0
                     # Unduck musiikki kun hiljaisuus on tarpeeksi pitkä puheen jälkeen.
                     if music_ducked and (now - last_speech_or_send) >= MUSIC_UNDUCK_SILENCE_SECONDS:
-                        try:
-                            from Tools.music import unduck
-                            unduck()
-                        except Exception:
-                            pass
+                        music = _get_music()
+                        if music:
+                            try:
+                                music.unduck()
+                            except Exception:
+                                pass
                         music_ducked = False
 
         except KeyboardInterrupt:

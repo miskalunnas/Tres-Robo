@@ -59,13 +59,13 @@ class ToolExecutionResult:
     success: bool = True
 
 
-def handle_speech(text: str, *, language: str = "") -> ToolExecutionResult:
-    """Parse text and execute a local tool command when possible. language: fi, en, etc."""
+def handle_speech(text: str, *, language: str = "", parsed_cmd: dict | None = None) -> ToolExecutionResult:
+    """Parse text and execute a local tool command when possible. If parsed_cmd is provided, use it instead of parsing."""
     if not (text or "").strip():
         return ToolExecutionResult(handled=False)
 
     lang = "en" if language == "en" else "fi"
-    cmd = parse_command(text.strip())
+    cmd = parsed_cmd if parsed_cmd is not None else parse_command(text.strip())
     if not cmd:
         return ToolExecutionResult(handled=False)
 

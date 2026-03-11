@@ -58,6 +58,24 @@ from Tools import handle_speech as handle_tool_speech
 from Tools.commands import parse_command
 from voice.tts import SpeechHandle, interrupt as interrupt_speech, speak
 
+# Lazy music-moduuli (is_playing hotpathilla).
+_music_module = None
+
+
+def _get_music():
+    """Palauttaa Tools.music-moduulin tai None."""
+    global _music_module
+    if _music_module is None:
+        try:
+            import Tools.music as _m
+            _music_module = _m
+        except Exception:
+            pass
+    return _music_module
+
+
+WAKE_DEBUG = os.environ.get("WAKE_DEBUG", "").strip().lower() in ("1", "true", "yes")
+
 # Pidemmät ensin — "hei bot" ennen "bot" jotta remainder = "mikä kello on"
 # Whisper-virheet: "bot" → "both" taustamusiikin takia
 WAKE_WORDS = [
@@ -135,6 +153,11 @@ SESSION_END_PATTERNS = (
         r"\b(?:lopetetaan|lopetetaan puhuminen|lopetetaan tää|lopetetaan tämä|sopii näin|selvä kiitos|okei kiitos|okei selvä|kiitos hei|kiitos moi|kiitos näkemiin|ei tarvitse enää|en tarvitse enää|se siinä)\b"
     ),
 )
+# Sleep on session-endin alajoukko — viestin valintaa varten.
+SLEEP_END_PATTERNS = (
+    re.compile(r"\b(?:mene nukkumaan|mennä nukkumaan|nuku nyt|mene lepoon|lepotila|mene lepotilaan|siirry lepotilaan)\b", re.I),
+    re.compile(r"\b(?:go to sleep|sleep now|you can sleep|take a nap)\b", re.I),
+)
 INTERRUPT_WORDS = [
     "stop",
     "stop talking",
@@ -188,16 +211,12 @@ class ConversationEngine:
         self._session_language: str = ""  # viimeisin tunnistettu kieli
 
     # ------------------------------------------------------------------
-    def handle(self, text: str, now: float, *, language: str = "") -> None:
-        """Called by main.py for every transcribed utterance."""
+    def handle(self, text: str, now: float, *, language: str = "", parsed_cmd: dict | None = None) -> None:
+        """Called by main.py for every transcribed utterance. parsed_cmd: optional pre-parsed command from dialogue_worker."""
         with self._lock:
             # Musiikin soidessa ei mene nukkumaan — musiikki = taustamelu, botti pysyy hereillä
-            skip_timeout = False
-            try:
-                from Tools.music import is_playing
-                skip_timeout = is_playing()
-            except Exception:
-                pass
+            music = _get_music()
+            skip_timeout = bool(music and music.is_playing())
             if not skip_timeout and self._online and (now - self._last_activity) >= INACTIVITY_TIMEOUT:
                 print(
                     f"[Engine] No speech for {INACTIVITY_TIMEOUT:.0f}s — going OFFLINE."
@@ -213,31 +232,24 @@ class ConversationEngine:
             if not self._online:
                 print(f"[Offline heard] {text}")
                 # Musiikki soi: hyväksytään musiikkikomennot ilman herätyssanaa (skip, tauko, lopeta)
-                try:
-                    from Tools.music import is_playing
-                    if is_playing():
-                        cmd = parse_command(text)
-                        if cmd and cmd.get("action") in (
-                            "music_play", "music_skip", "music_pause", "music_resume", "music_stop",
-                            "music_queue", "volume_up", "volume_down",
-                        ):
-                            tool_result = handle_tool_speech(text, language=language)
-                            if tool_result.handled and tool_result.response:
-                                self._speak_reply(tool_result.response)
-                            self._last_activity = now
-                            return
-                except Exception:
-                    pass
+                music = _get_music()
+                if music and music.is_playing():
+                    cmd = parsed_cmd if parsed_cmd is not None else parse_command(text)
+                    if cmd and cmd.get("action") in (
+                        "music_play", "music_skip", "music_pause", "music_resume", "music_stop",
+                        "music_queue", "volume_up", "volume_down",
+                    ):
+                        tool_result = handle_tool_speech(text, language=language)
+                        if tool_result.handled and tool_result.response:
+                            self._speak_reply(tool_result.response)
+                        self._last_activity = now
+                        return
                 if not matched_wake_word:
                     # Musiikki soi: lenient "hei" + "bot" erikseen
-                    try:
-                        from Tools.music import is_playing
-                        if is_playing():
-                            matched_wake_word = _lenient_wake_match(text)
-                    except Exception:
-                        pass
+                    if music and music.is_playing():
+                        matched_wake_word = _lenient_wake_match(text)
                 if not matched_wake_word:
-                    if os.environ.get("WAKE_DEBUG", "").strip().lower() in ("1", "true", "yes"):
+                    if WAKE_DEBUG:
                         print(f"[Wake debug] Ei herätyssanaa. Kuultiin: {repr(text)}")
                         print(f"[Wake debug] normalized={repr(normalized_flex)}", file=sys.stderr)
                     return
@@ -245,15 +257,15 @@ class ConversationEngine:
                 has_followup = bool(remainder.strip())
                 if has_followup:
                     self._start_session(now, matched_wake_word, announce=False)
-                    self._process_online_text(remainder.strip(), now=now, language=language)
+                    self._process_online_text(remainder.strip(), now=now, language=language, parsed_cmd=parsed_cmd)
                 else:
                     self._start_session(now, matched_wake_word, announce=False)
                     self._speak_reply("Hei!")
                 return
 
-            self._process_online_text(text, now=now, language=language)
+            self._process_online_text(text, now=now, language=language, parsed_cmd=parsed_cmd)
 
-    def handle_interruption(self, text: str, now: float, *, language: str = "") -> bool:
+    def handle_interruption(self, text: str, now: float, *, language: str = "", parsed_cmd: dict | None = None) -> bool:
         """Handle an utterance captured while the bot is speaking.
         Botti kuuntelee koko ajan; text = alusta lähtien kuunneltu puhe (koko segmentti).
         Päätetään reagoidaanko: vain selkeä keskeytys (wake word, stop, pitkä tarkoituksellinen lause)."""
@@ -264,8 +276,8 @@ class ConversationEngine:
                 (w for w in WAKE_WORDS if w in normalized or w in normalized_flex), None
             )
             matched_interrupt = next((word for word in INTERRUPT_WORDS if word in normalized), None)
-            matched_session_end = self._is_session_end_intent(text)
-            local_command = parse_command(text)
+            matched_session_end = self._is_session_end_intent(text)[0]
+            local_command = parsed_cmd if parsed_cmd is not None else parse_command(text)
             # Lyhyet segmentit: 5 tai vähemmän sanaa ilman wake/interrupt/session_end/komento → taustamelu, hylätään
             words = re.findall(r"\w+", normalized)
             if (
@@ -312,7 +324,7 @@ class ConversationEngine:
 
             # "stop" / "stop the music" jne. — suoritetaan music_stop aina kun kyseessä
             if local_command and local_command.get("action") == "music_stop":
-                tool_result = handle_tool_speech(text, language=language)
+                tool_result = handle_tool_speech(text, language=language, parsed_cmd=local_command)
                 if tool_result.handled and tool_result.response:
                     self._speak_reply(tool_result.response)
                 self._last_activity = now
@@ -326,7 +338,7 @@ class ConversationEngine:
                 self._last_activity = now
                 return True
 
-            self._process_online_text(remainder, now=now, language=language, interrupted=True)
+            self._process_online_text(remainder, now=now, language=language, interrupted=True, parsed_cmd=parsed_cmd)
             return True
 
     # ------------------------------------------------------------------
@@ -412,6 +424,7 @@ class ConversationEngine:
         now: float,
         language: str = "",
         interrupted: bool = False,
+        parsed_cmd: dict | None = None,
     ) -> None:
         self._last_activity = now
         # Kieli: Whisper → session muisti → tekstipohjainen arvio
@@ -424,27 +437,27 @@ class ConversationEngine:
                 language = inferred
         else:
             language = self._session_language
-        # Hylätään kaiku: botti kuulee omansa mikistä
+        # Hylätään kaiku: botti kuulee omansa mikistä. Yksi overlap-kynnys 0.4.
         refs = [r for r in (self._active_reply_text, self._last_spoken_text) if r and r.strip()]
         if refs and any(self._text_looks_like_echo(text, ref) for ref in refs):
             return
-        # Cooldown 2 s TTS:n jälkeen: tiukempi kaikun hylkäys (overlap 0.3)
-        if (now - self._last_tts_finished_at) < 2.0 and refs and any(self._text_looks_like_echo(text, ref, min_overlap=0.3) for ref in refs):
+        # Cooldown 2 s TTS:n jälkeen: sama overlap 0.4, vähemmän false-wakeja
+        if (now - self._last_tts_finished_at) < 2.0 and refs and any(self._text_looks_like_echo(text, ref) for ref in refs):
             return
         print(f"[Online heard] {text} [lang={language or '?'}]")
         print(f"You said: {text}")
         self._log_user_message(text)
 
-        if self._is_session_end_intent(text):
-            # Sleep/lepotila: erillinen vastaus
-            if self._is_sleep_intent(text):
+        is_end, is_sleep = self._is_session_end_intent(text)
+        if is_end:
+            if is_sleep:
                 bye_msg = {"en": "Going to sleep. Wake me when you need me.", "fi": "Menen lepoon. Herätä kun tarvitset."}.get(language, "Menen lepoon.")
             else:
                 bye_msg = {"en": "Okay, going offline.", "fi": "Hei hei!"}.get(language, "Hei hei!")
             self._speak_reply(bye_msg, end_session_reason="goodbye")
             return
 
-        tool_result = handle_tool_speech(text, language=language)
+        tool_result = handle_tool_speech(text, language=language, parsed_cmd=parsed_cmd)
         if tool_result.handled:
             if self._session_id and tool_result.action:
                 self._store.log_tool_call(
@@ -540,11 +553,11 @@ class ConversationEngine:
         language: str = "",
         interrupted: bool = False,
     ) -> None:
-        # Wait for startup vision (camera + face recognition) before the first LLM call
-        # so the bot knows who's in the room when generating the greeting.
+        # Wait for startup vision (camera + face recognition) before the first LLM call.
+        # Lyhyempi timeout 0.5 s = nopeampi ensimmäinen vastaus, vision ei jumita puhetta.
         ready_event = self._startup_vision_ready
         if ready_event is not None and not ready_event.is_set():
-            ready_event.wait(timeout=1.5)
+            ready_event.wait(timeout=0.5)
             self._startup_vision_ready = None  # Only gate the first turn
 
         tool_calls_out: list = []
@@ -633,8 +646,8 @@ class ConversationEngine:
             if generation == self._reply_generation and cancel_event.is_set():
                 self._active_reply_text = ""
 
-    # Pienempi kynnys = vähemmän TTS-kutsuja, lyhyet lauseet yhdistetään.
-    _TTS_BATCH_MIN_CHARS = 45
+    # Pienempi kynnys = vähemmän TTS-kutsuja, lyhyet lauseet yhdistetään. 65 = sulavampi puhe, vähemmän taukoja.
+    _TTS_BATCH_MIN_CHARS = 65
 
     def _speak_streamed_reply(self, chunks, *, generation: int, cancel_event: threading.Event) -> str:
         last_handle: SpeechHandle | None = None
@@ -698,24 +711,16 @@ class ConversationEngine:
         stripped = pattern.sub("", text, count=1)
         return stripped.strip(" ,.!?:;-")
 
-    def _is_session_end_intent(self, text: str) -> bool:
+    def _is_session_end_intent(self, text: str) -> tuple[bool, bool]:
+        """Palauttaa (is_end, is_sleep). is_sleep vain viestin valintaa varten."""
         normalized = self._normalize_intent_text(text)
         if not normalized:
-            return False
+            return (False, False)
         if "stop listening to" in normalized:
-            return False
-        return any(pattern.search(normalized) for pattern in SESSION_END_PATTERNS)
-
-    def _is_sleep_intent(self, text: str) -> bool:
-        """True jos käyttäjä haluaa botin mennä nukkumaan / sleep-tilaan."""
-        normalized = self._normalize_intent_text(text)
-        if not normalized:
-            return False
-        sleep_patterns = (
-            r"\b(?:mene nukkumaan|mennä nukkumaan|nuku nyt|mene lepoon|lepotila|mene lepotilaan|siirry lepotilaan)\b",
-            r"\b(?:go to sleep|sleep now|you can sleep|take a nap)\b",
-        )
-        return any(re.search(p, normalized, re.I) for p in sleep_patterns)
+            return (False, False)
+        is_end = any(pattern.search(normalized) for pattern in SESSION_END_PATTERNS)
+        is_sleep = any(p.search(normalized) for p in SLEEP_END_PATTERNS) if is_end else False
+        return (is_end, is_sleep)
 
     @staticmethod
     def _normalize_intent_text(text: str) -> str:
@@ -729,39 +734,18 @@ class ConversationEngine:
         self._active_reply_text = ""
 
     def _looks_like_clear_interrupt(self, text: str) -> bool:
-        """True vain jos puhe on selkeästi suunnattu botille (ei taustakeskustelu tai taustamelu).
-        Kaksitasoinen: vahva adressointi → alhaisempi kynnys; heikko → korkeampi."""
+        """True jos puhe on tarpeeksi pitkää ja tarkoituksellista (ei taustamelu). Yksinkertainen kynnys."""
         normalized = text.lower().strip()
         if not normalized:
             return False
-
         words = re.findall(r"\w+", normalized)
-        addressing_count = sum(
-            1 for kw in ADDRESSING_KEYWORDS
-            if re.search(rf"\b{re.escape(kw)}\b", normalized)
-        )
-        has_wake = any(w in normalized for w in WAKE_WORDS)
-
-        # Vahva adressointi: herätyssana tai 2+ adressointisanaa → korkeampi kynnys (ei keskeytä helposti)
-        if has_wake or addressing_count >= 2:
-            if len(words) >= 8 and len(normalized) >= 40:
-                pass  # fall through to echo check
-            else:
-                return False
-        # Heikko adressointi: 1 sana → vielä korkeampi kynnys (taustakeskustelu ei keskeytä)
-        elif addressing_count >= 1:
-            if len(words) >= 12 and len(normalized) >= 60:
-                pass
-            else:
-                return False
-        else:
+        # Pitkä lause (8+ sanaa tai 40+ merkkiä) = todennäköisesti tarkoituksellinen keskeytys
+        if len(words) < 8 and len(normalized) < 40:
             return False
-
         # Ei kaiku: hylätään jos teksti muistuttaa botin omaa puhetta
         for ref_text in (self._active_reply_text, self._last_spoken_text):
             if ref_text and self._text_looks_like_echo(normalized, ref_text):
                 return False
-
         return True
 
     def _looks_like_echo(self, text: str) -> bool:
@@ -769,7 +753,7 @@ class ConversationEngine:
         return self._text_looks_like_echo(text, self._active_reply_text)
 
     def _text_looks_like_echo(self, text: str, reference: str, *, min_overlap: float = 0.4) -> bool:
-        """True if text is largely the same as reference (bot's own speech). min_overlap 0.4 = ei reagoi omaan puheeseen."""
+        """True jos teksti muistuttaa viittausta (botin oma puhe). min_overlap: sanajoukon overlap 0.4 = ei reagoi omaan puheeseen."""
         rem = text.lower().strip()
         ref = reference.lower()
         if not rem or not ref:
@@ -783,10 +767,6 @@ class ConversationEngine:
             return True
         if len(rem) >= 4 and rem in ref:
             return True
-        # Sana osana toista: "jazz" kuuluu "jazzia" → kaiku
-        for w in words_rem:
-            if len(w) >= 3 and any(w in r or r in w for r in words_ref):
-                return True
         return False
 
     def _execute_llm_tool(self, name: str, args: dict, *, language: str = "") -> str:
