@@ -215,8 +215,12 @@ def transcribe(
 ) -> tuple[str, str]:
     """Prepare audio and run STT. Returns (text, language_code)."""
     audio = _prepare_audio(frames, native_sr)
-    if np.abs(audio).max() < 0.05:
+    peak = np.abs(audio).max()
+    if peak < 0.03:
+        if os.environ.get("WAKE_DEBUG", "").strip().lower() in ("1", "true", "yes"):
+            print(f"[Wake debug] Segment skipped: audio too quiet (peak={peak:.4f})", file=sys.stderr)
         return "", ""
+    # 0.03–0.05: hiljainen mutta kokeile Whisper (lyhyet "hei bot" voivat olla hiljaisia)
     if USE_CLOUD_STT:
         return _transcribe_cloud(audio)
     return _transcribe_local_with_lang(model, audio)
@@ -226,7 +230,11 @@ def _transcription_worker(model, native_sr: int) -> None:
     while True:
         task = segment_queue.get()
         try:
+            if os.environ.get("WAKE_DEBUG", "").strip().lower() in ("1", "true", "yes"):
+                print(f"[Wake debug] Segment → Whisper ({len(task.frames)} frames)", file=sys.stderr)
             text, lang = transcribe(model, task.frames, native_sr)
+            if os.environ.get("WAKE_DEBUG", "").strip().lower() in ("1", "true", "yes") and not text:
+                print(f"[Wake debug] Whisper palautti tyhjän", file=sys.stderr)
             if text:
                 _put_latest(
                     utterance_queue,
@@ -321,10 +329,11 @@ def _resolve_device_sample_rate(device, channels: int) -> int:
 
 
 def listen_forever() -> None:
-    # Mikki: MIC_DEVICE (ALSA hw:X,Y tai PortAudio-indeksi), MIC_CHANNELS (1/4),
-    # MIC_SAMPLE_RATE (esim. 16000), USE_DENOISER (0/1). Katso README "4-array microphone".
-    _dev = os.environ.get("MIC_DEVICE", "hw:2,0").strip()
-    MIC_DEVICE = int(_dev) if _dev.isdigit() else _dev if _dev else None
+    # Mikki: MIC_DEVICE (ALSA hw:X,Y Linux, PortAudio-indeksi Windows). Katso README.
+    # Windows: hw:2,0 ei toimi — käytä None (oletus) tai numeerista indeksiä (0, 1, 2...).
+    _default_dev = "" if sys.platform == "win32" else "hw:2,0"
+    _dev = os.environ.get("MIC_DEVICE", _default_dev).strip()
+    MIC_DEVICE = int(_dev) if _dev.isdigit() else (_dev if _dev else None)
 
     # MIC_CHANNELS: 1 = mono/käsitelty, 4 = 4-array raaka → keskiarvo monoksi.
     MIC_CHANNELS = int(os.environ.get("MIC_CHANNELS", "1"))

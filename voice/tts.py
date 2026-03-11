@@ -1,7 +1,7 @@
-"""Text-to-speech: Google Translate (gTTS) tai ElevenLabs.
+"""Text-to-speech: ElevenLabs tai Google Translate (gTTS).
 
-Oletus: Google (ilmainen, ei API-avainta). Vaihda TTS_PROVIDER=elevenlabs + ELEVENLABS_API_KEY.
-Audio toistetaan järjestelmän oletuslähtöön (esim. Bluetooth-kaiutin).
+Oletus: ElevenLabs (TTS_PROVIDER=elevenlabs). Vaihda TTS_PROVIDER=google ilmaiseen Google TTS:ään.
+Vaatii ELEVENLABS_API_KEY ja ELEVENLABS_VOICE_ID .env:ssä.
 """
 
 import io
@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-TTS_PROVIDER = os.getenv("TTS_PROVIDER", "google").strip().lower()
+TTS_PROVIDER = os.getenv("TTS_PROVIDER", "elevenlabs").strip().lower()
 _ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "")
 _VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "")
 

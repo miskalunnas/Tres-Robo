@@ -6,6 +6,7 @@ State machine:
            Returns to OFFLINE on inactivity timeout or a clear end-of-chat intent.
 """
 import json
+import os
 import re
 import sys
 import threading
@@ -229,6 +230,9 @@ class ConversationEngine:
                     except Exception:
                         pass
                 if not matched_wake_word:
+                    if os.environ.get("WAKE_DEBUG", "").strip().lower() in ("1", "true", "yes"):
+                        print(f"[Wake debug] Ei herätyssanaa. Kuultiin: {repr(text)}")
+                        print(f"[Wake debug] normalized={repr(normalized_flex)}", file=sys.stderr)
                     return
                 remainder = self._strip_phrase(text, matched_wake_word)
                 has_followup = bool(remainder.strip())
