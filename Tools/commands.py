@@ -41,6 +41,8 @@ PLAY_QUERY_BLOCKLIST = frozenset({"vaikka", "sitten", "nyt", "vähän", "vahan",
 GENRE_ONLY_WORDS = frozenset({"jazz", "chill", "lo-fi", "lofi", "rauhallinen", "rento", "taustamusiikki"})
 
 # Simple keywords (no query).
+# "seuraavaksi" ja "skip" voivat esiintyä keskustelussa ("arvaa mitä rakennetaan seuraavaksi") — ei triggeröidä pitkissä lauseissa.
+AMBIGUOUS_SKIP_KEYWORDS = frozenset({"seuraavaksi", "skip"})
 SKIP_KEYWORDS = (
     "next song", "next track", "next one", "next tune", "another song", "different song",
     "skip this song", "skip this track", "skip this", "skip it", "skip to next",
@@ -273,8 +275,19 @@ def parse_command(text: str) -> dict | None:
     # ── 3. Simple music commands ──────────────────────────────────
     # Fuzzy fallback: Whisper-virheet (skipp→skip, pauseta→pause) — difflib 0.82 kynnys.
 
-    if any(_word_match(kw, normalized) for kw in SKIP_KEYWORDS) or _fuzzy_match_keywords(SKIP_KEYWORDS, normalized):
-        return {"action": "music_skip", "response": "Skipping to next song."}
+    skip_matched = [kw for kw in SKIP_KEYWORDS if _word_match(kw, normalized)]
+    fuzzy_skip = _fuzzy_match_keywords(SKIP_KEYWORDS, normalized)
+    if skip_matched or fuzzy_skip:
+        words = re.findall(r"\w+", normalized)
+        # Pitkä lause: vain "seuraavaksi"/"skip" = keskustelua, ei komento
+        if len(words) > 4:
+            strong_match = any(kw not in AMBIGUOUS_SKIP_KEYWORDS for kw in skip_matched)
+            if not strong_match and not skip_matched and fuzzy_skip:
+                pass  # fuzzy match pitkässä lauseessa → älä triggeröi
+            elif strong_match:
+                return {"action": "music_skip", "response": "Skipping to next song."}
+        else:
+            return {"action": "music_skip", "response": "Skipping to next song."}
 
     if any(_word_match(kw, normalized) for kw in PAUSE_KEYWORDS) or _fuzzy_match_keywords(PAUSE_KEYWORDS, normalized):
         if not _PAUSE_BLOCKLIST.search(text):

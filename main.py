@@ -33,7 +33,7 @@ else:
 VAD_SAMPLE_RATE = 16_000
 
 # VAD: 0 = herkimmin (kauempaa puhuttu), 1 = tasapaino, 2 = vähemmän taustamelua, 3 = vahvin.
-_vad = os.environ.get("VAD_AGGRESSIVENESS", "1").strip()
+_vad = os.environ.get("VAD_AGGRESSIVENESS", "2").strip()
 VAD_AGGRESSIVENESS = int(_vad) if _vad.isdigit() and 0 <= int(_vad) <= 3 else 1
 
 # VAD frame length (10, 20 or 30 ms). 20 ms = tarkempi, enemmän CPU.
@@ -96,7 +96,7 @@ WHISPER_MODEL = "small"
 # Whisper: herätyssanat ensin. FI + EN fraasit tasapainottavat kielitunnistusta.
 # Genret ja paikat: Whisper tunnistaa usein väärin — prompt auttaa (jazz ei jas, seuraava ei seuraa).
 WHISPER_PROMPT = (
-    "Hei bot, hei botti, hei both, kuule bot, kuule botti, kuule both, hey bot, hey both, hi bot, hi both, listen bot. "
+    "Hei bot, hei botti, hei bot, kuule bot, kuule botti, kuule bot, hey bot, hey both, hi bot, hi bot, listen bot. "
     "Founderbot, founder bot. "
     "Play, skip, pause, resume, stop, queue, volume up, volume down. "
     "Soita, tauko, jatka, lopeta, seuraava, kovempaa, hiljempaa. "

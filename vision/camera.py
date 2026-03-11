@@ -117,10 +117,17 @@ class Camera:
 
     # ------------------------------------------------------------------
     def capture(self) -> np.ndarray:
-        """Return a single BGR frame as a numpy array (H, W, 3) uint8."""
+        """Return a single BGR frame as a numpy array (H, W, 3) uint8. Kuvat käännetään 180° ennen käsittelyä."""
+        import cv2  # type: ignore[import]
+
         if self._backend == "picamera2":
-            return self._capture_picamera2()
-        return self._capture_opencv()
+            frame = self._capture_picamera2()
+        else:
+            frame = self._capture_opencv()
+        # Kaikki kuvat 180° ympäri ennen käsittelyä (kamera voi olla ylösalaisin).
+        # Vain tässä kohdassa — älä lisää kääntöä muualle (see, identity, enroll käyttävät tätä).
+        frame = cv2.rotate(frame, cv2.ROTATE_180)
+        return frame
 
     # ------------------------------------------------------------------
     def _open(self) -> None:
