@@ -33,15 +33,15 @@ else:
 VAD_SAMPLE_RATE = 16_000
 
 # VAD: 0 = herkimmin (kauempaa puhuttu), 1 = tasapaino, 2 = vähemmän taustamelua, 3 = vahvin.
-_vad = os.environ.get("VAD_AGGRESSIVENESS", "2").strip()
-VAD_AGGRESSIVENESS = int(_vad) if _vad.isdigit() and 0 <= int(_vad) <= 3 else 1
+_vad = os.environ.get("VAD_AGGRESSIVENESS", "3").strip()
+VAD_AGGRESSIVENESS = int(_vad) if _vad.isdigit() and 0 <= int(_vad) <= 3 else 2
 
 # VAD frame length (10, 20 or 30 ms). 20 ms = tarkempi, enemmän CPU.
 _vad_frame = os.environ.get("VAD_FRAME_DURATION_MS", "20").strip()
 VAD_FRAME_DURATION_MS = int(_vad_frame) if _vad_frame.isdigit() and int(_vad_frame) in (10, 20, 30) else 20
 
 # Segmenting: how much audio to collect before sending to Whisper.
-MIN_SEGMENT_SECONDS = 0.5
+MIN_SEGMENT_SECONDS = 0.7
 MAX_SEGMENT_SECONDS = 8.0
 # OFFLINE: herätys helppo — lyhyet "hei bot" pääsevät läpi nopeasti.
 MIN_SEGMENT_WHEN_OFFLINE = 0.25
@@ -207,8 +207,8 @@ def _prepare_audio(frames: list[np.ndarray], native_sr: int) -> np.ndarray:
             print(f"[Denoiser error] {exc}", file=sys.stderr)
     peak = np.abs(audio).max()
     if peak > 1e-4:
-        # Kauempaa puhuttaessa ääni on hiljaisempi — vahvistus jopa 8x
-        audio = audio * min(0.95 / peak, 8.0)
+        # Kauempaa puhuttaessa ääni on hiljaisempi — vahvistus jopa 4x
+        audio = audio * min(0.95 / peak, 4.0)
     return audio
 
 
@@ -258,7 +258,7 @@ def transcribe(
     """Prepare audio and run STT. Returns (text, language_code)."""
     audio = _prepare_audio(frames, native_sr)
     peak = np.abs(audio).max()
-    if peak < 0.03:
+    if peak < 0.05:
         if WAKE_DEBUG:
             print(f"[Wake debug] Segment skipped: audio too quiet (peak={peak:.4f})", file=sys.stderr)
         return "", ""

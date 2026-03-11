@@ -583,6 +583,7 @@ class ConversationEngine:
 
         tool_results: list[str] = []
         always_speak_results: list[str] = []
+        end_conversation_farewell: str | None = None
         for tc in tool_calls_out:
             name = getattr(getattr(tc, "function", None), "name", None) or ""
             raw_args = getattr(getattr(tc, "function", None), "arguments", None) or "{}"
@@ -591,7 +592,9 @@ class ConversationEngine:
             except json.JSONDecodeError:
                 args = {}
             result = self._execute_llm_tool(name, args, language=language)
-            if result:
+            if name == "end_conversation":
+                end_conversation_farewell = result or ("Hei hei!" if language != "en" else "See you!")
+            elif result:
                 if name in _ALWAYS_SPEAK:
                     always_speak_results.append(result)
                 else:
@@ -613,6 +616,11 @@ class ConversationEngine:
         if not full_reply and not always_speak_results and tool_results:
             reply = tool_results[0] if len(tool_results) == 1 else ". ".join(tool_results)
             self._speak_reply(reply)
+
+        # LLM-initiated conversation end: speak farewell then close session.
+        if end_conversation_farewell:
+            print(f"[Engine] LLM ended conversation: {end_conversation_farewell}")
+            self._speak_reply(end_conversation_farewell, end_session_reason="llm_goodbye")
 
         with self._lock:
             if self._reply_cancel_event is cancel_event:
@@ -844,6 +852,9 @@ class ConversationEngine:
             question = (args.get("question") or "Kuvaile lyhyesti mitä näet.").strip()
             print(f"[Vision] Capturing frame for question: {question}")
             return capture_and_describe(question, self._brain._client)
+        if name == "end_conversation":
+            farewell = (args.get("farewell") or "").strip()
+            return farewell or ("Hei hei!" if lang == "fi" else "See you!")
         return ""
 
     def _log_user_message(self, text: str) -> None:

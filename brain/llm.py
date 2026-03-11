@@ -173,6 +173,29 @@ LLM_TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "end_conversation",
+            "description": (
+                "End the conversation and go offline. "
+                "Call this when the exchange is clearly finished: user says thanks/bye/that's all, "
+                "or the topic is fully resolved and the user shows no sign of continuing. "
+                "Do NOT call for every short reply — only when the conversation is genuinely done. "
+                "Provide a short, natural farewell in the user's language as the 'farewell' argument."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "farewell": {
+                        "type": "string",
+                        "description": "Short farewell in the user's language, e.g. 'Hei hei!', 'Moikka!', 'See you!', 'Catch you later!'",
+                    }
+                },
+                "required": ["farewell"],
+            },
+        },
+    },
 ]
 
 
