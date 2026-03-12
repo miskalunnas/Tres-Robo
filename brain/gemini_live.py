@@ -183,29 +183,7 @@ class GeminiLiveSession:
                     break
                 msg_count += 1
 
-                # Debug: inspect first few responses to understand structure
-                if msg_count <= 5:
-                    attrs = [a for a in dir(response) if not a.startswith("_")]
-                    print(f"[Gemini] Response #{msg_count} type={type(response).__name__} attrs={attrs}")
-                    # Check server_content structure
-                    sc = getattr(response, "server_content", None)
-                    if sc:
-                        sc_attrs = [a for a in dir(sc) if not a.startswith("_")]
-                        print(f"[Gemini]   server_content attrs={sc_attrs}")
-                        model_turn = getattr(sc, "model_turn", None)
-                        if model_turn:
-                            parts = getattr(model_turn, "parts", [])
-                            for i, part in enumerate(parts or []):
-                                part_attrs = [a for a in dir(part) if not a.startswith("_")]
-                                print(f"[Gemini]   part[{i}] attrs={part_attrs}")
-                                inline = getattr(part, "inline_data", None)
-                                if inline:
-                                    print(f"[Gemini]   part[{i}] inline_data: mime={getattr(inline, 'mime_type', '?')} len={len(getattr(inline, 'data', b''))}")
-                        turn_complete = getattr(sc, "turn_complete", None)
-                        if turn_complete:
-                            print(f"[Gemini]   turn_complete={turn_complete}")
-
-                # Audio output — try both response.data and server_content.model_turn.parts
+                # Extract audio: try response.data first, then inline_data
                 audio_data = getattr(response, "data", None)
                 if not audio_data:
                     sc = getattr(response, "server_content", None)
@@ -220,8 +198,8 @@ class GeminiLiveSession:
 
                 if audio_data:
                     audio_chunk_count += 1
-                    if audio_chunk_count == 1:
-                        print(f"[Gemini] First audio out received ({len(audio_data)} bytes)")
+                    if audio_chunk_count in (1, 10):
+                        print(f"[Gemini] Audio out chunk #{audio_chunk_count} ({len(audio_data)} bytes)")
                     self._audio_out_handler(audio_data)
 
                 # Tool calls

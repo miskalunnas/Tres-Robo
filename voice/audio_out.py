@@ -127,7 +127,8 @@ class AudioPlayer:
             return None  # sounddevice fallback
 
         try:
-            proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
+            proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+            print(f"[AudioOut] Started: {' '.join(cmd)} (pid={proc.pid})")
             with self._lock:
                 self._proc = proc
             return proc
@@ -136,12 +137,16 @@ class AudioPlayer:
             return None
 
     def _play_loop(self) -> None:
+        chunk_count = 0
         while True:
             data = self._queue.get()
             if data is None:
                 break
             if not data:
                 continue
+            chunk_count += 1
+            if chunk_count in (1, 10, 50):
+                print(f"[AudioOut] Playing chunk #{chunk_count} ({len(data)} bytes)")
 
             if self._player_type == "sounddevice":
                 self._play_sounddevice(data)
@@ -152,12 +157,14 @@ class AudioPlayer:
         """Write PCM bytes to the paplay/aplay subprocess stdin."""
         proc = self._ensure_proc()
         if proc is None:
+            print("[AudioOut] No subprocess, falling back to sounddevice", file=sys.stderr)
             self._play_sounddevice(data)  # fallback
             return
         try:
             proc.stdin.write(data)
             proc.stdin.flush()
-        except (BrokenPipeError, OSError):
+        except (BrokenPipeError, OSError) as exc:
+            print(f"[AudioOut] Write error: {exc}", file=sys.stderr)
             # Process died, restart on next chunk
             with self._lock:
                 self._proc = None
