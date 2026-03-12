@@ -349,8 +349,12 @@ def listen_forever() -> None:
         state["session"] = None
 
     def start_session() -> None:
+        nonlocal segment_duration, silence_duration
         print("[Engine] Wake word → ONLINE (Gemini Live)")
         audio_player.stop()
+        speech_frames.clear()
+        segment_duration = 0.0
+        silence_duration = 0.0
 
         startup_ctx = _run_startup_vision()
         full_prompt = (startup_ctx + "\n\n" + SYSTEM_PROMPT) if startup_ctx else SYSTEM_PROMPT
