@@ -65,16 +65,25 @@ class GeminiLiveSession:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._audio_queue: asyncio.Queue | None = None
         self._closed = False
+        self._ready = threading.Event()
+        self._send_count = 0
 
     def start(self) -> None:
         """Start the session in a background daemon thread."""
         t = threading.Thread(target=self._run_loop, daemon=True, name="gemini-live")
         t.start()
 
+    def wait_ready(self, timeout: float = 10.0) -> bool:
+        """Block until the WebSocket session is open. Returns True if ready."""
+        return self._ready.wait(timeout=timeout)
+
     def send_audio(self, pcm_bytes: bytes) -> None:
         """Thread-safe: enqueue raw 16kHz PCM bytes to send to Gemini."""
         if self._loop and self._audio_queue and not self._closed:
             self._loop.call_soon_threadsafe(self._audio_queue.put_nowait, pcm_bytes)
+            self._send_count += 1
+            if self._send_count in (1, 50, 200):
+                print(f"[Gemini] Audio chunks sent: {self._send_count}")
 
     def close(self) -> None:
         """Thread-safe: close the session."""
@@ -138,7 +147,8 @@ class GeminiLiveSession:
         print(f"[Gemini] Opening session (model={GEMINI_LIVE_MODEL}, voice={GEMINI_VOICE})")
         try:
             async with client.aio.live.connect(model=GEMINI_LIVE_MODEL, config=config) as session:
-                print("[Gemini] Session open.")
+                print("[Gemini] Session open — streaming audio.")
+                self._ready.set()
                 await asyncio.gather(
                     self._send_loop(session),
                     self._receive_loop(session),
@@ -165,6 +175,7 @@ class GeminiLiveSession:
 
     async def _receive_loop(self, session) -> None:
         """Receive audio output and tool calls from Gemini."""
+        audio_chunk_count = 0
         try:
             async for response in session.receive():
                 if self._closed:
@@ -172,12 +183,25 @@ class GeminiLiveSession:
 
                 # Audio output (raw PCM bytes at GEMINI_SAMPLE_RATE_OUT)
                 if getattr(response, "data", None):
+                    audio_chunk_count += 1
+                    if audio_chunk_count == 1:
+                        print(f"[Gemini] First audio out received ({len(response.data)} bytes)")
                     self._audio_out_handler(response.data)
 
                 # Tool calls
                 tool_call = getattr(response, "tool_call", None)
                 if tool_call:
                     await self._handle_tool_calls(session, tool_call)
+
+                # Log any server message types we're not handling
+                if not getattr(response, "data", None) and not getattr(response, "tool_call", None):
+                    # Check for text, turn completion, etc.
+                    text = getattr(response, "text", None)
+                    if text:
+                        print(f"[Gemini] Text: {text[:100]}")
+                    server_content = getattr(response, "server_content", None)
+                    if server_content and not text:
+                        print(f"[Gemini] Server event: {type(server_content).__name__}")
 
         except Exception as exc:
             if not self._closed:

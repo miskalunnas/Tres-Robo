@@ -369,6 +369,10 @@ def listen_forever() -> None:
             on_session_end=on_session_end,
         )
         session.start()
+        if not session.wait_ready(timeout=10.0):
+            print("[Engine] Gemini session failed to open in time.", file=sys.stderr)
+            session.close()
+            return
         state["session"] = session
         state["online"] = True
         state["last_audio_out"] = time.monotonic()
