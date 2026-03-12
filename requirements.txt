@@ -13,6 +13,9 @@ faster-whisper
 gTTS
 elevenlabs
 
+# Gemini Live
+google-genai>=0.8
+
 # Audio
 noisereduce
 
