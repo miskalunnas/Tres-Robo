@@ -145,6 +145,7 @@ def _put_latest(q: queue.Queue, item) -> None:
 
 # Lue kerran käynnistyksessä — ei env-lukua hotpathilla.
 WAKE_DEBUG = os.environ.get("WAKE_DEBUG", "").strip().lower() in ("1", "true", "yes")
+LATENCY_DEBUG = os.environ.get("LATENCY_DEBUG", "").strip().lower() in ("1", "true", "yes")
 
 # Lazy music-moduuli: yksi importti, selkeä fallback.
 _music_module = None
@@ -274,9 +275,13 @@ def _transcription_worker(model, native_sr: int) -> None:
         try:
             if WAKE_DEBUG:
                 print(f"[Wake debug] Segment → Whisper ({len(task.frames)} frames)", file=sys.stderr)
+            if LATENCY_DEBUG:
+                print(f"[Latency] Whisper start: {time.monotonic() - task.heard_at:.2f}s after speech", file=sys.stderr)
             text, lang = transcribe(model, task.frames, native_sr)
             if WAKE_DEBUG and not text:
                 print(f"[Wake debug] Whisper palautti tyhjän", file=sys.stderr)
+            if LATENCY_DEBUG and text:
+                print(f"[Latency] Whisper done:  {time.monotonic() - task.heard_at:.2f}s after speech → '{text[:40]}'", file=sys.stderr)
             if text:
                 _put_latest(
                     utterance_queue,
@@ -319,6 +324,8 @@ def _dialogue_worker(engine: ConversationEngine) -> None:
     while True:
         utterance = utterance_queue.get()
         try:
+            if LATENCY_DEBUG:
+                print(f"[Latency] handle() start: {time.monotonic() - utterance.heard_at:.2f}s after speech", file=sys.stderr)
             parsed_cmd = parse_command(utterance.text) if utterance.text else None
             if utterance.interruption:
                 engine.handle_interruption(

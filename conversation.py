@@ -12,6 +12,8 @@ import sys
 import threading
 import time
 
+LATENCY_DEBUG = os.environ.get("LATENCY_DEBUG", "").strip().lower() in ("1", "true", "yes")
+
 from brain import Brain
 
 # Fallback: tunnista kieli tekstistä kun Whisper ei palauta
@@ -560,6 +562,8 @@ class ConversationEngine:
             ready_event.wait(timeout=0.5)
             self._startup_vision_ready = None  # Only gate the first turn
 
+        if LATENCY_DEBUG:
+            print(f"[Latency] LLM call start (t={time.monotonic():.3f})", file=sys.stderr)
         tool_calls_out: list = []
         chunks = self._brain.stream_think_with_tools(
             text,
