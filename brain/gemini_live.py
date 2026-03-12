@@ -24,7 +24,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY", "")
-GEMINI_LIVE_MODEL = os.environ.get("GEMINI_LIVE_MODEL", "gemini-live-2.5-flash-native-audio")
+GEMINI_LIVE_MODEL = os.environ.get("GEMINI_LIVE_MODEL", "gemini-2.5-flash-native-audio-preview-12-2025")
 GEMINI_VOICE = os.environ.get("GEMINI_VOICE", "Puck")
 
 # Input: 16kHz 16-bit PCM mono (matches webrtcvad / Whisper pipeline)

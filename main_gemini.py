@@ -228,10 +228,10 @@ def _run_startup_vision() -> str:
     """Capture a frame and identify faces. Returns context string for system prompt."""
     try:
         from vision.camera import Camera
-        from vision.face_id import identify_faces
+        from vision.identity_manager import FaceManager
         with Camera(warmup_seconds=0.5) as cam:
             frame = cam.capture()
-        names = identify_faces(frame)
+        names = FaceManager.get().recognize_faces(frame)
         if names:
             return f"Aloituskuva (kamera sessioalussa): Huoneessa tunnistettu: {', '.join(names)}."
         return "Aloituskuva: Ei tunnistettuja henkilöitä huoneessa."
