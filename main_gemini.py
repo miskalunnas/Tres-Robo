@@ -32,9 +32,34 @@ import webrtcvad
 from brain.gemini_live import GeminiLiveSession, GEMINI_SAMPLE_RATE_IN, GEMINI_SAMPLE_RATE_OUT
 from brain.llm import LLM_TOOLS, SYSTEM_PROMPT  # reuse existing tools + system prompt
 from voice.audio_out import AudioPlayer
-from conversation import WAKE_WORDS, _lenient_wake_match, _normalize_for_wake
 from memory.store import MemoryStore
 from voice import stt_openai
+
+# ── Wake word matching (inlined to avoid importing conversation.py's heavy deps) ─
+import re
+
+WAKE_WORDS = [
+    "hei bot", "hei botti", "hei both", "hei robot", "hei robotti",
+    "kuule bot", "kuule botti", "kuule both",
+    "hey bot", "hey both", "hi bot", "hi both", "listen bot",
+    "founderbot", "founder bot", "founder bott", "founderbott", "founderbotti",
+    "found a bot", "founder",
+    "bot", "robot", "robotti", "botti",
+]
+
+
+def _normalize_for_wake(text: str) -> str:
+    s = text.lower().strip()
+    s = re.sub(r"[,.!?:;]+", " ", s)
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def _lenient_wake_match(text: str) -> str | None:
+    n = _normalize_for_wake(text)
+    words = set(re.findall(r"\b[a-zäö]+\b", n))
+    if (words & {"hei", "hey", "hi", "kuule"}) and (words & {"bot", "botti", "both", "robot", "robotti"}):
+        return "hei bot"
+    return None
 
 # ── Audio capture settings ─────────────────────────────────────────────────────
 VAD_SAMPLE_RATE = 16_000
