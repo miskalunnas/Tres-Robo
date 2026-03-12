@@ -176,36 +176,64 @@ class GeminiLiveSession:
     async def _receive_loop(self, session) -> None:
         """Receive audio output and tool calls from Gemini."""
         audio_chunk_count = 0
+        msg_count = 0
         try:
             async for response in session.receive():
                 if self._closed:
                     break
+                msg_count += 1
 
-                # Audio output (raw PCM bytes at GEMINI_SAMPLE_RATE_OUT)
-                if getattr(response, "data", None):
+                # Debug: inspect first few responses to understand structure
+                if msg_count <= 5:
+                    attrs = [a for a in dir(response) if not a.startswith("_")]
+                    print(f"[Gemini] Response #{msg_count} type={type(response).__name__} attrs={attrs}")
+                    # Check server_content structure
+                    sc = getattr(response, "server_content", None)
+                    if sc:
+                        sc_attrs = [a for a in dir(sc) if not a.startswith("_")]
+                        print(f"[Gemini]   server_content attrs={sc_attrs}")
+                        model_turn = getattr(sc, "model_turn", None)
+                        if model_turn:
+                            parts = getattr(model_turn, "parts", [])
+                            for i, part in enumerate(parts or []):
+                                part_attrs = [a for a in dir(part) if not a.startswith("_")]
+                                print(f"[Gemini]   part[{i}] attrs={part_attrs}")
+                                inline = getattr(part, "inline_data", None)
+                                if inline:
+                                    print(f"[Gemini]   part[{i}] inline_data: mime={getattr(inline, 'mime_type', '?')} len={len(getattr(inline, 'data', b''))}")
+                        turn_complete = getattr(sc, "turn_complete", None)
+                        if turn_complete:
+                            print(f"[Gemini]   turn_complete={turn_complete}")
+
+                # Audio output — try both response.data and server_content.model_turn.parts
+                audio_data = getattr(response, "data", None)
+                if not audio_data:
+                    sc = getattr(response, "server_content", None)
+                    if sc:
+                        model_turn = getattr(sc, "model_turn", None)
+                        if model_turn:
+                            for part in getattr(model_turn, "parts", []) or []:
+                                inline = getattr(part, "inline_data", None)
+                                if inline and getattr(inline, "data", None):
+                                    audio_data = inline.data
+                                    break
+
+                if audio_data:
                     audio_chunk_count += 1
                     if audio_chunk_count == 1:
-                        print(f"[Gemini] First audio out received ({len(response.data)} bytes)")
-                    self._audio_out_handler(response.data)
+                        print(f"[Gemini] First audio out received ({len(audio_data)} bytes)")
+                    self._audio_out_handler(audio_data)
 
                 # Tool calls
                 tool_call = getattr(response, "tool_call", None)
                 if tool_call:
                     await self._handle_tool_calls(session, tool_call)
 
-                # Log any server message types we're not handling
-                if not getattr(response, "data", None) and not getattr(response, "tool_call", None):
-                    # Check for text, turn completion, etc.
-                    text = getattr(response, "text", None)
-                    if text:
-                        print(f"[Gemini] Text: {text[:100]}")
-                    server_content = getattr(response, "server_content", None)
-                    if server_content and not text:
-                        print(f"[Gemini] Server event: {type(server_content).__name__}")
-
         except Exception as exc:
             if not self._closed:
                 print(f"[Gemini] Receive error: {exc}", file=sys.stderr)
+        finally:
+            print(f"[Gemini] Receive loop ended. Messages: {msg_count}, audio chunks: {audio_chunk_count}")
 
     async def _handle_tool_calls(self, session, tool_call) -> None:
         """Execute tool calls synchronously and send results back."""
