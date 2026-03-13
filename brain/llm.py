@@ -29,16 +29,16 @@ LLM_TOOLS = [
         "function": {
             "name": "play_music",
             "description": (
-                "Soita musiikkia. Käytä kun käyttäjä pyytää soittamaan: 'soita jazz', 'laitetaan chill', 'play lo-fi', 'taustamusiikkia'."
-                " Query = HAKUSANA jolla etsitään biisi YouTubesta. Genren/tyylin kohdalla käytä esim. 'jazz music', 'chill music' — EI pelkkää 'jazz' (etsii genren joukosta biisin)."
-                " Artistilla/biisillä: 'Beatles', 'Bohemian Rhapsody'. Älä toista käyttäjän sanoja — kutsu työkalu ja anna search-query."
+                "Play music. Call when user asks to play music: 'play jazz', 'put on some chill', 'play lo-fi', 'soita jazz', 'laitetaan chill', 'taustamusiikkia'. "
+                "query = YouTube search term. For genres use e.g. 'jazz music', 'chill music', 'lo-fi beats' — not just 'jazz'. "
+                "For artists/songs: 'Beatles', 'Bohemian Rhapsody'. Call the tool — don't repeat back what the user said."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "YouTube-hakusana: genre (jazz music, chill music, lo-fi), artisti tai biisin nimi.",
+                        "description": "YouTube search term: genre (jazz music, chill music, lo-fi), artist or song name.",
                     }
                 },
                 "required": ["query"],
@@ -49,7 +49,7 @@ LLM_TOOLS = [
         "type": "function",
         "function": {
             "name": "music_skip",
-            "description": "Seuraava kappale. Käytä kun: 'seuraava', 'skip', 'vaihda biisi', 'next', 'toinen biisi'.",
+            "description": "Skip to next track. Use when: 'next', 'skip', 'next song', 'seuraava', 'vaihda biisi'.",
             "parameters": {"type": "object", "properties": {}},
         },
     },
@@ -57,7 +57,7 @@ LLM_TOOLS = [
         "type": "function",
         "function": {
             "name": "music_pause",
-            "description": "Tauko. Käytä kun: 'tauko', 'pause', 'pauseta', 'pidä tauko'.",
+            "description": "Pause music. Use when: 'pause', 'stop for a moment', 'tauko', 'pauseta'.",
             "parameters": {"type": "object", "properties": {}},
         },
     },
@@ -65,7 +65,7 @@ LLM_TOOLS = [
         "type": "function",
         "function": {
             "name": "music_resume",
-            "description": "Jatka soittoa. Käytä kun: 'jatka', 'resume', 'jatka soitto', 'continue'.",
+            "description": "Resume music. Use when: 'resume', 'continue', 'play again', 'jatka', 'jatka soitto'.",
             "parameters": {"type": "object", "properties": {}},
         },
     },
@@ -73,7 +73,7 @@ LLM_TOOLS = [
         "type": "function",
         "function": {
             "name": "music_stop",
-            "description": "Lopeta musiikki ja tyhjennä jono. Käytä kun: 'lopeta', 'stop', 'musiikki pois', 'poista kaikki', 'tyhjennä jono', 'clear'.",
+            "description": "Stop music and clear queue. Use when: 'stop music', 'turn off music', 'clear queue', 'lopeta', 'musiikki pois'.",
             "parameters": {"type": "object", "properties": {}},
         },
     },
@@ -81,13 +81,13 @@ LLM_TOOLS = [
         "type": "function",
         "function": {
             "name": "music_add_to_queue",
-            "description": "Lisää jonoon. Käytä kun: 'lisää jonoon', 'laita seuraavaksi', 'queue', 'laita jonoon' + biisi/artisti.",
+            "description": "Add song to queue. Use when: 'add to queue', 'queue this', 'play next', 'lisää jonoon', 'laita seuraavaksi'.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "Biisin tai artistin nimi.",
+                        "description": "Song or artist name.",
                     }
                 },
                 "required": ["query"],
@@ -98,7 +98,7 @@ LLM_TOOLS = [
         "type": "function",
         "function": {
             "name": "music_volume_up",
-            "description": "Ääni kovemmalle. Käytä kun: 'kovemmalle', 'louder', 'ääni ylös', 'volume up'.",
+            "description": "Volume up. Use when: 'louder', 'turn it up', 'volume up', 'kovemmalle', 'ääni ylös'.",
             "parameters": {"type": "object", "properties": {}},
         },
     },
@@ -106,7 +106,7 @@ LLM_TOOLS = [
         "type": "function",
         "function": {
             "name": "music_volume_down",
-            "description": "Ääni hiljemmalle. Käytä kun: 'hiljemmalle', 'quieter', 'ääni alas', 'volume down'.",
+            "description": "Volume down. Use when: 'quieter', 'turn it down', 'volume down', 'hiljemmalle', 'ääni alas'.",
             "parameters": {"type": "object", "properties": {}},
         },
     },

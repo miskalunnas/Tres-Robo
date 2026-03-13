@@ -165,7 +165,7 @@ def execute_tool(name: str, args: dict) -> str:
         if url is None:
             return "En löytänyt biisiä."
         play_async(query, url=url)
-        return _play_response_casual(query, "fi")
+        return f"Playing: {query}"
 
     if name == "music_skip":
         from Tools.music import skip
