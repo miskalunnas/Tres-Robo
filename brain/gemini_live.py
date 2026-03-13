@@ -26,6 +26,7 @@ load_dotenv()
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY", "")
 GEMINI_LIVE_MODEL = os.environ.get("GEMINI_LIVE_MODEL", "gemini-2.5-flash-native-audio-preview-12-2025")
 GEMINI_VOICE = os.environ.get("GEMINI_VOICE", "Charon")
+GEMINI_TEMPERATURE = float(os.environ.get("GEMINI_TEMPERATURE", "1.4"))
 
 # Input: 16kHz 16-bit PCM mono (matches webrtcvad / Whisper pipeline)
 GEMINI_SAMPLE_RATE_IN = 16_000
@@ -175,8 +176,10 @@ class GeminiLiveSession:
                     )
                 ),
             ),
+            generation_config=types.GenerationConfig(temperature=GEMINI_TEMPERATURE),
             **({} if thinking_cfg is None else {"thinking_config": thinking_cfg}),
         )
+        print(f"[Gemini] Temperature: {GEMINI_TEMPERATURE}")
 
         print(f"[Gemini] Opening session (model={GEMINI_LIVE_MODEL}, voice={GEMINI_VOICE})")
         try:

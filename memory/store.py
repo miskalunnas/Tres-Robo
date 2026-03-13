@@ -380,18 +380,48 @@ class MemoryStore:
     # Knowledge base (FTS)
     # ------------------------------------------------------------------
 
-    def add_knowledge(self, source: str, content: str) -> None:
-        """Add a text chunk to the searchable knowledge base."""
+    def add_knowledge(self, source: str, content: str) -> int:
+        """Add a text chunk to the searchable knowledge base. Returns the new row id."""
         content = content.strip()
         if not content:
-            return
-        self._execute(
+            return -1
+        cursor = self._execute(
             """
-            INSERT INTO knowledge (source, content, created_at)
-            VALUES (?, ?, ?)
+            INSERT INTO knowledge (source, content, created_at, processed)
+            VALUES (?, ?, ?, 0)
             """,
             (source.strip()[:200], content[:10000], _utc_now()),
         )
+        return cursor.lastrowid  # type: ignore[return-value]
+
+    def list_unprocessed_knowledge(self, source: str = "conversation") -> list[tuple[int, str]]:
+        """Return (id, content) for unprocessed rows with the given source."""
+        rows = self._fetchall(
+            "SELECT id, content FROM knowledge WHERE source = ? AND processed = 0 ORDER BY id",
+            (source,),
+        )
+        return [(row["id"], row["content"]) for row in rows]
+
+    def mark_knowledge_processed(self, row_id: int) -> None:
+        """Mark a knowledge row as processed by the curator."""
+        self._execute("UPDATE knowledge SET processed = 1 WHERE id = ?", (row_id,))
+
+    def reload_knowledge_source(self, source: str, file_path: Path) -> int:
+        """Re-index a single knowledge file (by source name). Preserves other sources."""
+        text = file_path.read_text(encoding="utf-8").strip()
+        with self._lock:
+            self._conn.execute("DELETE FROM knowledge WHERE source = ?", (source,))
+            self._conn.commit()
+        count = 0
+        for para in text.split("\n\n"):
+            para = para.strip()
+            if para:
+                self._execute(
+                    "INSERT INTO knowledge (source, content, created_at, processed) VALUES (?, ?, ?, 1)",
+                    (source, para[:10000], _utc_now()),
+                )
+                count += 1
+        return count
 
     def search_knowledge(self, query: str, *, limit: int = 8) -> list[str]:
         """Search the knowledge base. Uses FTS5 if available, else LIKE (works without FTS5)."""
@@ -459,12 +489,16 @@ class MemoryStore:
 
     def load_knowledge_from_text_dir(self, dir_path: Path | None = None) -> int:
         """Load knowledge from data/knowledge/*.txt. Each file = one source; paragraphs = chunks.
-        Returns number of chunks inserted. Replaces existing knowledge."""
+        Returns number of chunks inserted. Replaces existing file-sourced knowledge but
+        preserves entries saved at runtime (source='conversation')."""
         if dir_path is None:
             dir_path = self._path.parent.parent / "data" / "knowledge"
         if not dir_path.is_dir():
             return 0
-        self.clear_knowledge()
+        # Only remove file-sourced entries — preserve conversation-learned facts.
+        with self._lock:
+            self._conn.execute("DELETE FROM knowledge WHERE source != 'conversation'")
+            self._conn.commit()
         count = 0
         for f in sorted(dir_path.glob("*.txt")):
             try:
@@ -475,7 +509,10 @@ class MemoryStore:
                 for para in text.split("\n\n"):
                     para = para.strip()
                     if para:
-                        self.add_knowledge(source, para)
+                        self._execute(
+                            "INSERT INTO knowledge (source, content, created_at, processed) VALUES (?, ?, ?, 1)",
+                            (source, para[:10000], _utc_now()),
+                        )
                         count += 1
             except Exception:
                 pass
@@ -696,7 +733,8 @@ class MemoryStore:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     source TEXT NOT NULL,
                     content TEXT NOT NULL,
-                    created_at TEXT NOT NULL
+                    created_at TEXT NOT NULL,
+                    processed INTEGER NOT NULL DEFAULT 0
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_knowledge_source ON knowledge(source);
@@ -729,6 +767,7 @@ class MemoryStore:
             )
             self._conn.commit()
         self._migrate_sessions_summary()
+        self._migrate_knowledge_processed()
 
     def _migrate_sessions_summary(self) -> None:
         """Add summary column to sessions if missing (for existing DBs)."""
@@ -739,6 +778,14 @@ class MemoryStore:
             columns = [r[1] for r in row]
             if "summary" not in columns:
                 self._conn.execute("ALTER TABLE sessions ADD COLUMN summary TEXT")
+                self._conn.commit()
+
+    def _migrate_knowledge_processed(self) -> None:
+        """Add processed column to knowledge if missing (for existing DBs)."""
+        with self._lock:
+            cols = [r[1] for r in self._conn.execute("PRAGMA table_info(knowledge)").fetchall()]
+            if "processed" not in cols:
+                self._conn.execute("ALTER TABLE knowledge ADD COLUMN processed INTEGER NOT NULL DEFAULT 0")
                 self._conn.commit()
 
     @staticmethod

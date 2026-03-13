@@ -215,6 +215,15 @@ def execute_tool(name: str, args: dict) -> str:
         print(f"[Vision] Capturing for: {question}")
         return capture_and_describe(question, _get_openai_client())
 
+    if name == "save_knowledge":
+        fact = (args.get("fact") or "").strip()
+        if fact:
+            _store.add_knowledge(source="conversation", content=fact)
+            print(f"[Knowledge] Saved: {fact}")
+            from memory.curator import curate_pending
+            curate_pending()
+        return "Saved."
+
     if name == "end_conversation":
         # Handled as a side effect by the caller; just return the farewell text
         return args.get("farewell") or "Hei hei!"

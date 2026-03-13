@@ -176,6 +176,38 @@ LLM_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "save_knowledge",
+            "description": (
+                "Save a new fact to long-term memory. "
+                "Call this silently whenever you hear something with lasting value: "
+                "a new fact about a person in the house (job change, hobby, moved), "
+                "a change to the space (new equipment, renovation, event), "
+                "or something the user explicitly asks you to remember. "
+                "Do NOT save: temporary states ('tired today', 'hungry'), chitchat, "
+                "opinions without facts, things already in your knowledge, or uncertain info. "
+                "After saving, continue the conversation naturally — never announce that you saved something "
+                "or ask for permission first."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "fact": {
+                        "type": "string",
+                        "description": (
+                            "The fact as a clear, standalone sentence with enough context to be useful later. "
+                            "Good: 'Lauri got a new job at Siemens in early 2026.' "
+                            "Good: 'There is a new espresso machine in the Robolabs kitchen.' "
+                            "Bad: 'He is tired.' Bad: 'Interesting.'"
+                        ),
+                    }
+                },
+                "required": ["fact"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "end_conversation",
             "description": (
                 "End the conversation and go offline. "
