@@ -385,13 +385,17 @@ class MemoryStore:
         content = content.strip()
         if not content:
             return -1
-        cursor = self._execute(
-            """
-            INSERT INTO knowledge (source, content, created_at, processed)
-            VALUES (?, ?, ?, 0)
-            """,
-            (source.strip()[:200], content[:10000], _utc_now()),
-        )
+        try:
+            cursor = self._execute(
+                "INSERT INTO knowledge (source, content, created_at, processed) VALUES (?, ?, ?, 0)",
+                (source.strip()[:200], content[:10000], _utc_now()),
+            )
+        except sqlite3.OperationalError:
+            # processed column not yet migrated (old DB) — fall back to 3-column insert
+            cursor = self._execute(
+                "INSERT INTO knowledge (source, content, created_at) VALUES (?, ?, ?)",
+                (source.strip()[:200], content[:10000], _utc_now()),
+            )
         return cursor.lastrowid  # type: ignore[return-value]
 
     def list_unprocessed_knowledge(self, source: str = "conversation") -> list[tuple[int, str]]:

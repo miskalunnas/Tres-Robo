@@ -75,7 +75,7 @@ MAX_SILENCE_WHEN_OFFLINE = 0.6
 MAX_SEGMENT_OFFLINE = 8.0
 
 # Session inactivity: close if Gemini hasn't produced audio for this long
-INACTIVITY_TIMEOUT_SECONDS = 40.0
+INACTIVITY_TIMEOUT_SECONDS = 30.0
 
 try:
     MIC_GAIN = float(os.environ.get("MIC_GAIN", "1.5").strip())
@@ -180,8 +180,12 @@ def execute_tool(name: str, args: dict) -> str:
         return "Jatketaan." if resume() else "Ei ole mitään soimassa."
 
     if name == "music_stop":
+        import subprocess as _sp
         from Tools.music import stop
-        return "Lopetettu." if stop() else "Ei ole mitään soimassa."
+        stop()
+        for _cmd in ("mpv", "ffplay", "mpg123"):
+            _sp.run(["pkill", "-f", _cmd], capture_output=True)
+        return "Lopetettu."
 
     if name == "music_add_to_queue":
         from Tools.music import add_to_queue
@@ -416,12 +420,6 @@ def listen_forever() -> None:
             session.close()
         state["session"] = None
         state["online"] = False
-        # Stop any music that was playing during the session
-        try:
-            from Tools.music import stop as music_stop
-            music_stop()
-        except Exception:
-            pass
         state["end_requested"] = False
 
     def check_wake(text: str) -> None:
