@@ -56,14 +56,17 @@ class GeminiLiveSession:
         tool_handler: Callable[[str, dict], str],
         audio_out_handler: Callable[[bytes], None],
         on_session_end: Callable[[], None] | None = None,
+        greeting: str = "Hei! Kuuntelen.",
     ) -> None:
         self._system_prompt = system_prompt
         self._tools = tools
         self._tool_handler = tool_handler
         self._audio_out_handler = audio_out_handler
         self._on_session_end = on_session_end
+        self._greeting = greeting
         self._loop: asyncio.AbstractEventLoop | None = None
         self._audio_queue: asyncio.Queue | None = None
+        self._text_queue: asyncio.Queue | None = None
         self._closed = False
         self._ready = threading.Event()
         self._send_count = 0
@@ -84,6 +87,11 @@ class GeminiLiveSession:
             self._send_count += 1
             if self._send_count in (1, 50, 200):
                 print(f"[Gemini] Audio chunks sent: {self._send_count}")
+
+    def send_text(self, text: str) -> None:
+        """Thread-safe: send a text message to Gemini (end_of_turn=True)."""
+        if self._loop and self._text_queue and not self._closed:
+            self._loop.call_soon_threadsafe(self._text_queue.put_nowait, text)
 
     def close(self) -> None:
         """Thread-safe: close the session."""
@@ -126,15 +134,18 @@ class GeminiLiveSession:
 
         client = genai.Client(api_key=GOOGLE_API_KEY)
         self._audio_queue = asyncio.Queue(maxsize=512)
+        self._text_queue = asyncio.Queue(maxsize=32)
 
         gemini_tools = _convert_tools_to_gemini(self._tools)
+        # TODO: Re-enable tools once basic audio flow is confirmed working
+        use_tools = os.environ.get("GEMINI_TOOLS", "0").strip().lower() in ("1", "true", "yes")
 
         config = types.LiveConnectConfig(
             response_modalities=["AUDIO"],
             system_instruction=types.Content(
                 parts=[types.Part(text=self._system_prompt)]
             ),
-            tools=gemini_tools if gemini_tools else None,
+            tools=gemini_tools if (gemini_tools and use_tools) else None,
             speech_config=types.SpeechConfig(
                 voice_config=types.VoiceConfig(
                     prebuilt_voice_config=types.PrebuiltVoiceConfig(
@@ -149,28 +160,62 @@ class GeminiLiveSession:
             async with client.aio.live.connect(model=GEMINI_LIVE_MODEL, config=config) as session:
                 print("[Gemini] Session open — streaming audio.")
                 self._ready.set()
+                # Send greeting immediately so bot speaks on wake (also proves audio out works)
+                if self._greeting:
+                    await session.send(input=self._greeting, end_of_turn=True)
+                    print(f"[Gemini] Greeting sent: {self._greeting!r}")
                 await asyncio.gather(
                     self._send_loop(session),
                     self._receive_loop(session),
+                    self._text_loop(session),
                 )
         except Exception as exc:
             if not self._closed:
                 print(f"[Gemini] Session error: {exc}", file=sys.stderr)
 
     async def _send_loop(self, session) -> None:
-        """Dequeue PCM frames and stream them to Gemini."""
+        """Dequeue PCM frames, batch them, and stream to Gemini."""
+        # Batch small 20ms frames into ~200ms chunks for efficient WebSocket use
+        BATCH_INTERVAL = 0.2  # seconds
+        buffer = bytearray()
+        last_send = asyncio.get_event_loop().time()
+
         while not self._closed:
             try:
                 pcm = await asyncio.wait_for(self._audio_queue.get(), timeout=0.05)
-                await session.send(
-                    input={"data": pcm, "mime_type": f"audio/pcm;rate={GEMINI_SAMPLE_RATE_IN}"},
-                    end_of_turn=False,
-                )
+                buffer.extend(pcm)
+            except asyncio.TimeoutError:
+                pass
+            except Exception as exc:
+                if not self._closed:
+                    print(f"[Gemini] Send error: {exc}", file=sys.stderr)
+                break
+
+            now = asyncio.get_event_loop().time()
+            if buffer and (now - last_send) >= BATCH_INTERVAL:
+                try:
+                    await session.send(
+                        input={"data": bytes(buffer), "mime_type": f"audio/pcm;rate={GEMINI_SAMPLE_RATE_IN}"},
+                        end_of_turn=False,
+                    )
+                except Exception as exc:
+                    if not self._closed:
+                        print(f"[Gemini] Send error: {exc}", file=sys.stderr)
+                    break
+                buffer.clear()
+                last_send = now
+
+    async def _text_loop(self, session) -> None:
+        """Send queued text messages to Gemini (used for follow-up turns)."""
+        while not self._closed:
+            try:
+                text = await asyncio.wait_for(self._text_queue.get(), timeout=1.0)
+                await session.send(input=text, end_of_turn=True)
             except asyncio.TimeoutError:
                 continue
             except Exception as exc:
                 if not self._closed:
-                    print(f"[Gemini] Send error: {exc}", file=sys.stderr)
+                    print(f"[Gemini] Text send error: {exc}", file=sys.stderr)
                 break
 
     async def _receive_loop(self, session) -> None:

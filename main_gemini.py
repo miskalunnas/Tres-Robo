@@ -322,7 +322,8 @@ def listen_forever() -> None:
     state = {
         "online": False,
         "session": None,            # GeminiLiveSession | None
-        "last_audio_out": 0.0,      # for inactivity timeout
+        "last_audio_out": 0.0,      # updated when Gemini sends audio
+        "last_audio_in": 0.0,       # updated while user is speaking
         "end_requested": False,     # set when end_conversation fires
     }
 
@@ -376,6 +377,7 @@ def listen_forever() -> None:
         state["session"] = session
         state["online"] = True
         state["last_audio_out"] = time.monotonic()
+        state["last_audio_in"] = time.monotonic()
         state["end_requested"] = False
 
     def end_session(reason: str = "timeout") -> None:
@@ -433,9 +435,11 @@ def listen_forever() -> None:
                             resample(mono, native_sr, GEMINI_SAMPLE_RATE_IN)
                         )
                         session.send_audio(pcm16)
+                        state["last_audio_in"] = now  # reset while user is speaking
 
-                    # Inactivity timeout
-                    if (now - state["last_audio_out"]) > INACTIVITY_TIMEOUT_SECONDS:
+                    # Inactivity: time out if neither side has produced audio recently
+                    last_activity = max(state["last_audio_out"], state["last_audio_in"])
+                    if (now - last_activity) > INACTIVITY_TIMEOUT_SECONDS:
                         end_session("timeout")
 
                     # LLM-requested conversation end
