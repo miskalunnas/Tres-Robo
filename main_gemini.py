@@ -407,6 +407,12 @@ def listen_forever() -> None:
             session.close()
         state["session"] = None
         state["online"] = False
+        # Stop any music that was playing during the session
+        try:
+            from Tools.music import stop as music_stop
+            music_stop()
+        except Exception:
+            pass
         state["end_requested"] = False
 
     def check_wake(text: str) -> None:
