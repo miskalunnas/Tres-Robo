@@ -457,7 +457,7 @@ def listen_forever() -> None:
                     session = state["session"]
                     # Suppress mic while bot is speaking (queue busy) OR just
                     # finished (cooldown covers paplay's internal buffer drain).
-                    if session and not audio_player.is_busy() and not audio_player.recently_played(cooldown=1.2):
+                    if session and not audio_player.recently_played(cooldown=0.5):
                         pcm16 = float32_to_pcm16(
                             resample(mono, native_sr, GEMINI_SAMPLE_RATE_IN)
                         )

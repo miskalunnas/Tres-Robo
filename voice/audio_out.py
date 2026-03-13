@@ -54,6 +54,7 @@ class AudioPlayer:
         self._proc: subprocess.Popen | None = None
         self._lock = threading.Lock()
         self._last_played_at: float = 0.0
+        self._expected_done_at: float = 0.0  # monotonic time when audio should finish
         self._thread = threading.Thread(target=self._play_loop, daemon=True, name="audio-out")
         self._thread.start()
         print(f"[AudioOut] Using: {self._player_type} ({self._sr} Hz)")
@@ -74,10 +75,11 @@ class AudioPlayer:
         """True if there are chunks waiting to be played."""
         return not self._queue.empty()
 
-    def recently_played(self, cooldown: float = 1.0) -> bool:
-        """True if audio was played within the last `cooldown` seconds.
-        Use to gate mic input so the bot doesn't hear its own output."""
-        return (time.monotonic() - self._last_played_at) < cooldown
+    def recently_played(self, cooldown: float = 0.5) -> bool:
+        """True if audio is still playing or finished within the last `cooldown` seconds.
+        Uses expected playback duration (from byte count) so the gate stays closed
+        for the full duration of the audio, not just until the last chunk is sent."""
+        return time.monotonic() < self._expected_done_at + cooldown
 
     def stop(self) -> None:
         """Flush pending audio and kill the current player process."""
@@ -87,6 +89,7 @@ class AudioPlayer:
             except queue.Empty:
                 break
         self._kill_proc()
+        self._expected_done_at = 0.0  # mic gate resets immediately on stop
 
     def shutdown(self) -> None:
         """Signal the play loop to exit."""
@@ -159,7 +162,13 @@ class AudioPlayer:
                 self._play_sounddevice(data)
             else:
                 self._play_subprocess(data)
-            self._last_played_at = time.monotonic()
+
+            # Accumulate expected playback duration from byte count.
+            # 16-bit mono: 2 bytes per sample → duration = bytes / (sr * 2)
+            now = time.monotonic()
+            duration = len(data) / (self._sr * 2)
+            self._expected_done_at = max(self._expected_done_at, now) + duration
+            self._last_played_at = now
 
     def _play_subprocess(self, data: bytes) -> None:
         """Write PCM bytes to the paplay/aplay subprocess stdin."""
