@@ -190,7 +190,11 @@ class GeminiLiveSession:
                 )
         except Exception as exc:
             if not self._closed:
-                print(f"[Gemini] Session error: {exc}", file=sys.stderr)
+                msg = str(exc)
+                if "1008" in msg or "policy violation" in msg or "not found" in msg.lower():
+                    print("[Gemini] Session ended by server (max duration reached) → going offline")
+                else:
+                    print(f"[Gemini] Session error: {exc}", file=sys.stderr)
 
     async def _send_loop(self, session) -> None:
         """Dequeue PCM frames, batch them, and stream to Gemini."""
