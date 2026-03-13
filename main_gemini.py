@@ -369,7 +369,9 @@ def listen_forever() -> None:
         silence_duration = 0.0
 
         startup_ctx = _run_startup_vision()
-        full_prompt = (startup_ctx + "\n\n" + SYSTEM_PROMPT) if startup_ctx else SYSTEM_PROMPT
+        # Prepend a language override — native audio models need this prominent.
+        lang_prefix = "CRITICAL: Always reply in the same language the user just spoke. English input → English reply. Finnish input → Finnish reply. Never switch language mid-response.\n\n"
+        full_prompt = lang_prefix + ((startup_ctx + "\n\n") if startup_ctx else "") + SYSTEM_PROMPT
         if startup_ctx:
             print(f"[Vision] {startup_ctx}")
 
@@ -441,7 +443,9 @@ def listen_forever() -> None:
                 if state["online"]:
                     # ── ONLINE: stream raw audio to Gemini ───────────────────
                     session = state["session"]
-                    if session:
+                    # Suppress mic while bot is speaking (or just finished) to
+                    # prevent the model hearing its own output and interrupting itself.
+                    if session and not audio_player.recently_played(cooldown=1.0):
                         pcm16 = float32_to_pcm16(
                             resample(mono, native_sr, GEMINI_SAMPLE_RATE_IN)
                         )

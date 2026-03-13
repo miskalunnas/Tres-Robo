@@ -153,8 +153,7 @@ class GeminiLiveSession:
         self._text_queue = asyncio.Queue(maxsize=32)
 
         gemini_tools = _convert_tools_to_gemini(self._tools)
-        # TODO: Re-enable tools once basic audio flow is confirmed working
-        use_tools = os.environ.get("GEMINI_TOOLS", "0").strip().lower() in ("1", "true", "yes")
+        use_tools = os.environ.get("GEMINI_TOOLS", "1").strip().lower() not in ("0", "false", "no")
 
         # Disable thinking (chain-of-thought) — reduces latency from ~10s to ~1s.
         # ThinkingConfig may not be available on all SDK versions; ignore if so.

@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 
 import numpy as np
 
@@ -52,6 +53,7 @@ class AudioPlayer:
         self._queue: queue.Queue[bytes | None] = queue.Queue(maxsize=128)
         self._proc: subprocess.Popen | None = None
         self._lock = threading.Lock()
+        self._last_played_at: float = 0.0
         self._thread = threading.Thread(target=self._play_loop, daemon=True, name="audio-out")
         self._thread.start()
         print(f"[AudioOut] Using: {self._player_type} ({self._sr} Hz)")
@@ -71,6 +73,11 @@ class AudioPlayer:
     def is_busy(self) -> bool:
         """True if there are chunks waiting to be played."""
         return not self._queue.empty()
+
+    def recently_played(self, cooldown: float = 1.0) -> bool:
+        """True if audio was played within the last `cooldown` seconds.
+        Use to gate mic input so the bot doesn't hear its own output."""
+        return (time.monotonic() - self._last_played_at) < cooldown
 
     def stop(self) -> None:
         """Flush pending audio and kill the current player process."""
@@ -152,6 +159,7 @@ class AudioPlayer:
                 self._play_sounddevice(data)
             else:
                 self._play_subprocess(data)
+            self._last_played_at = time.monotonic()
 
     def _play_subprocess(self, data: bytes) -> None:
         """Write PCM bytes to the paplay/aplay subprocess stdin."""
