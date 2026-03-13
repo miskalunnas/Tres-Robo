@@ -156,6 +156,13 @@ class GeminiLiveSession:
         # TODO: Re-enable tools once basic audio flow is confirmed working
         use_tools = os.environ.get("GEMINI_TOOLS", "0").strip().lower() in ("1", "true", "yes")
 
+        # Disable thinking (chain-of-thought) — reduces latency from ~10s to ~1s.
+        # ThinkingConfig may not be available on all SDK versions; ignore if so.
+        try:
+            thinking_cfg = types.ThinkingConfig(thinking_budget=0)
+        except Exception:
+            thinking_cfg = None
+
         config = types.LiveConnectConfig(
             response_modalities=["AUDIO"],
             system_instruction=types.Content(
@@ -169,6 +176,7 @@ class GeminiLiveSession:
                     )
                 ),
             ),
+            **({} if thinking_cfg is None else {"thinking_config": thinking_cfg}),
         )
 
         print(f"[Gemini] Opening session (model={GEMINI_LIVE_MODEL}, voice={GEMINI_VOICE})")
@@ -187,8 +195,9 @@ class GeminiLiveSession:
 
     async def _send_loop(self, session) -> None:
         """Dequeue PCM frames, batch them, and stream to Gemini."""
-        # Batch small 20ms frames into ~200ms chunks for efficient WebSocket use
-        BATCH_INTERVAL = 0.2  # seconds
+        # 50ms batches — small enough to keep latency low, large enough to avoid
+        # flooding the WebSocket with 20ms micro-frames.
+        BATCH_INTERVAL = 0.05  # seconds
         buffer = bytearray()
         last_send = asyncio.get_event_loop().time()
 
