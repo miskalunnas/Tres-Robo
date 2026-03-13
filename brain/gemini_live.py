@@ -231,38 +231,39 @@ class GeminiLiveSession:
                 break
 
     async def _receive_loop(self, session) -> None:
-        """Receive audio output and tool calls from Gemini."""
+        """Receive audio output and tool calls from Gemini (multi-turn)."""
         audio_chunk_count = 0
         msg_count = 0
         try:
-            async for response in session.receive():
-                if self._closed:
-                    break
-                msg_count += 1
+            while not self._closed:
+                async for response in session.receive():
+                    if self._closed:
+                        break
+                    msg_count += 1
 
-                # Extract audio: try response.data first, then inline_data
-                audio_data = getattr(response, "data", None)
-                if not audio_data:
-                    sc = getattr(response, "server_content", None)
-                    if sc:
-                        model_turn = getattr(sc, "model_turn", None)
-                        if model_turn:
-                            for part in getattr(model_turn, "parts", []) or []:
-                                inline = getattr(part, "inline_data", None)
-                                if inline and getattr(inline, "data", None):
-                                    audio_data = inline.data
-                                    break
+                    # Extract audio: try response.data first, then inline_data
+                    audio_data = getattr(response, "data", None)
+                    if not audio_data:
+                        sc = getattr(response, "server_content", None)
+                        if sc:
+                            model_turn = getattr(sc, "model_turn", None)
+                            if model_turn:
+                                for part in getattr(model_turn, "parts", []) or []:
+                                    inline = getattr(part, "inline_data", None)
+                                    if inline and getattr(inline, "data", None):
+                                        audio_data = inline.data
+                                        break
 
-                if audio_data:
-                    audio_chunk_count += 1
-                    if audio_chunk_count in (1, 10):
-                        print(f"[Gemini] Audio out chunk #{audio_chunk_count} ({len(audio_data)} bytes)")
-                    self._audio_out_handler(audio_data)
+                    if audio_data:
+                        audio_chunk_count += 1
+                        if audio_chunk_count in (1, 10, 100):
+                            print(f"[Gemini] Audio out chunk #{audio_chunk_count} ({len(audio_data)} bytes)")
+                        self._audio_out_handler(audio_data)
 
-                # Tool calls
-                tool_call = getattr(response, "tool_call", None)
-                if tool_call:
-                    await self._handle_tool_calls(session, tool_call)
+                    # Tool calls
+                    tool_call = getattr(response, "tool_call", None)
+                    if tool_call:
+                        await self._handle_tool_calls(session, tool_call)
 
         except Exception as exc:
             if not self._closed:
