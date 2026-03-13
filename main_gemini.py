@@ -368,12 +368,9 @@ def listen_forever() -> None:
         segment_duration = 0.0
         silence_duration = 0.0
 
-        startup_ctx = _run_startup_vision()
-        # Prepend a language override — native audio models need this prominent.
+        # Language override — native audio models need this prominent.
         lang_prefix = "CRITICAL: Always reply in the same language the user just spoke. English input → English reply. Finnish input → Finnish reply. Never switch language mid-response.\n\n"
-        full_prompt = lang_prefix + ((startup_ctx + "\n\n") if startup_ctx else "") + SYSTEM_PROMPT
-        if startup_ctx:
-            print(f"[Vision] {startup_ctx}")
+        full_prompt = lang_prefix + SYSTEM_PROMPT
 
         session = GeminiLiveSession(
             system_prompt=full_prompt,
@@ -392,6 +389,15 @@ def listen_forever() -> None:
         state["last_audio_out"] = time.monotonic()
         state["last_audio_in"] = time.monotonic()
         state["end_requested"] = False
+
+        # Run vision in background — inject context once camera finishes
+        # so the session opens immediately without waiting for the camera.
+        def _vision_and_inject():
+            ctx = _run_startup_vision()
+            if ctx and state["session"] is session:
+                print(f"[Vision] {ctx}")
+                session.send_text(f"[Context] {ctx}")
+        threading.Thread(target=_vision_and_inject, daemon=True, name="startup-vision").start()
 
     def end_session(reason: str = "timeout") -> None:
         print(f"[Engine] → OFFLINE ({reason})")
@@ -443,9 +449,9 @@ def listen_forever() -> None:
                 if state["online"]:
                     # ── ONLINE: stream raw audio to Gemini ───────────────────
                     session = state["session"]
-                    # Suppress mic while bot is speaking (or just finished) to
-                    # prevent the model hearing its own output and interrupting itself.
-                    if session and not audio_player.recently_played(cooldown=1.0):
+                    # Suppress mic while bot is speaking (queue busy) OR just
+                    # finished (cooldown covers paplay's internal buffer drain).
+                    if session and not audio_player.is_busy() and not audio_player.recently_played(cooldown=1.2):
                         pcm16 = float32_to_pcm16(
                             resample(mono, native_sr, GEMINI_SAMPLE_RATE_IN)
                         )
