@@ -83,10 +83,23 @@ class GeminiLiveSession:
     def send_audio(self, pcm_bytes: bytes) -> None:
         """Thread-safe: enqueue raw 16kHz PCM bytes to send to Gemini."""
         if self._loop and self._audio_queue and not self._closed:
-            self._loop.call_soon_threadsafe(self._audio_queue.put_nowait, pcm_bytes)
+            self._loop.call_soon_threadsafe(self._safe_enqueue, self._audio_queue, pcm_bytes)
             self._send_count += 1
             if self._send_count in (1, 50, 200):
                 print(f"[Gemini] Audio chunks sent: {self._send_count}")
+
+    @staticmethod
+    def _safe_enqueue(q: asyncio.Queue, item) -> None:
+        """Drop oldest item if queue is full rather than raising QueueFull."""
+        if q.full():
+            try:
+                q.get_nowait()
+            except asyncio.QueueEmpty:
+                pass
+        try:
+            q.put_nowait(item)
+        except asyncio.QueueFull:
+            pass
 
     def send_text(self, text: str) -> None:
         """Thread-safe: send a text message to Gemini (end_of_turn=True)."""
@@ -97,6 +110,9 @@ class GeminiLiveSession:
         """Thread-safe: close the session."""
         self._closed = True
         if self._loop and self._loop.is_running():
+            # Unblock the send loop so it can exit cleanly
+            if self._audio_queue:
+                self._loop.call_soon_threadsafe(self._safe_enqueue, self._audio_queue, b"")
             self._loop.call_soon_threadsafe(self._loop.stop)
 
     # ------------------------------------------------------------------ internal
@@ -160,10 +176,6 @@ class GeminiLiveSession:
             async with client.aio.live.connect(model=GEMINI_LIVE_MODEL, config=config) as session:
                 print("[Gemini] Session open — streaming audio.")
                 self._ready.set()
-                # Send greeting immediately so bot speaks on wake (also proves audio out works)
-                if self._greeting:
-                    await session.send(input=self._greeting, end_of_turn=True)
-                    print(f"[Gemini] Greeting sent: {self._greeting!r}")
                 await asyncio.gather(
                     self._send_loop(session),
                     self._receive_loop(session),

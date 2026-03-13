@@ -325,7 +325,11 @@ def listen_forever() -> None:
         "last_audio_out": 0.0,      # updated when Gemini sends audio
         "last_audio_in": 0.0,       # updated while user is speaking
         "end_requested": False,     # set when end_conversation fires
+        "session_closed_at": 0.0,   # for 409 cooldown between sessions
     }
+
+    # Minimum seconds between session close and next open (avoids 409 Conflict)
+    SESSION_COOLDOWN = 5.0
 
     # Offline VAD state
     speech_frames: list[np.ndarray] = []
@@ -348,9 +352,16 @@ def listen_forever() -> None:
         print("[Gemini] Session ended → OFFLINE")
         state["online"] = False
         state["session"] = None
+        state["session_closed_at"] = time.monotonic()
 
     def start_session() -> None:
         nonlocal segment_duration, silence_duration
+        # Enforce cooldown to avoid 409 Conflict (server-side session still closing)
+        since_close = time.monotonic() - state["session_closed_at"]
+        if since_close < SESSION_COOLDOWN:
+            wait = SESSION_COOLDOWN - since_close
+            print(f"[Engine] Waiting {wait:.1f}s for session cooldown...")
+            time.sleep(wait)
         print("[Engine] Wake word → ONLINE (Gemini Live)")
         audio_player.stop()
         speech_frames.clear()
