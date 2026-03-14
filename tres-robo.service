@@ -10,7 +10,6 @@ ExecStart=%h/Tres-Robo/.venv/bin/python main_gemini.py
 Restart=always
 RestartSec=5
 EnvironmentFile=%h/Tres-Robo/.env
-SupplementaryGroups=video audio
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=tres-robo
