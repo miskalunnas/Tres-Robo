@@ -1,0 +1,18 @@
+[Unit]
+Description=Tres-Robo voice assistant
+After=network-online.target sound.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/code/Tres-Robo
+ExecStart=%h/code/Tres-Robo/.venv/bin/python main_gemini.py
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+# Forward journald output to syslog with an identifier tag
+SyslogIdentifier=tres-robo
+
+[Install]
+WantedBy=default.target

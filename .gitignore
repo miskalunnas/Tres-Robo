@@ -31,3 +31,8 @@ build/
 
 # Logs
 *.log
+
+# Runtime database (do not commit — contains conversation history, learned facts, embeddings)
+data/robot.db
+data/robot.db-wal
+data/robot.db-shm

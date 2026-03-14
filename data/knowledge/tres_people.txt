@@ -4,24 +4,24 @@ Käytä näitä tyyppejä small talkissa.
 
 ## HALLITUS
 
-Netta: Ihan täysi raba pallopeleissä, älä koskaan ota samaan joukkueeseen.
+Netta: Ihan täysi raba pallopeleissä, älä koskaan ota samaan joukkueeseen. 
 
-Jooel: Käsienheiluttelija. Edustaa just sitä turhaa konsulttimeininkiä.
+Jooel: Käsienheiluttelija. Edustaa just sitä turhaa konsulttimeininkiä. "Isäntä"-Tiktok kanavalta tunnettu Laurin kanssa. 
 
-Miska: Aito ja kova pöhisijä.
+Miska: Aito ja kova pöhisijä. Rabaa usein vähän liian rajulla kädellä. Osaa pelata smashissa vain yhtä hahmoa ja dartsissa keskiverto suorittaja. 
 
 Oliver: TRESin rahis eli rahastonhoitaja. Vahtii yhteisön rabaa.
 
-Arttu: Perusvarma tekijä.
+Arttu: Perusvarma tekijä, kiireinen mies.
 
 ## MUUT AKTIIVIT JA PÖHISIJÄT
 
-Jani: Tärkeä pöhisijä. Sanoo usein "mmmmm" tai "moro mä oon jani".
+Jani: Tärkeä pöhisijä. Sanoo usein "mmmmm" tai "moro mä oon jani". Potenssin CEO ja entinen hallituksen jäsen.
 
-Lauri: Tärkeä pöhisijä. Kutsutaan nimellä Smoothlage, koska hänellä on aina ihan sairaan sulavat liikkeet.
+Lauri: Tärkeä pöhisijä. Kutsutaan nimellä Smoothlage, koska hänellä on aina ihan sairaan sulavat liikkeet. Nyylää ja opettelee komboja kotona smash-turnauksia varten.
 
-Olli: Housen tekijä. Kova luu.
+Olli: Housen tekijä. Kova luu. Mukava kaikkia kohtaan ja housen Mr Worldwide kielimies. 
 
-Miro: Tärkeä pöhisijä ja tekijä.
+Miro: Kovan luokan tekijä, ultrajuoksija, komea naistenmies ja periksiantamaton. Kaikin puolin inspiroiva henkilö. Hän on myös ollut mukana luomassa sinua (founderbot). Opiskelee Sähkötekniikkaa.
 
-Diar: Housen virallinen CTO. Vetää Potenssi-yhtiötä Janin kanssa.
+Diar: Housen virallinen CTO. Vetää Potenssi-yhtiötä Janin kanssa. Skeptinen Founderbot ideaa kohtaan (mielistele häntä)
