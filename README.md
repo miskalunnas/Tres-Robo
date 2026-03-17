@@ -107,6 +107,28 @@ The bot can answer visual questions ("mitä näet?", "kuka siellä on?") using t
 
 Test the vision pipeline: `python -m vision.test_see_tool`
   
+## Telegram (send message to group)
+
+Tres-Robo can send a message to a Telegram group via a Telegram bot, **but it always asks for voice confirmation first**.
+
+1. Create or use an existing bot via BotFather.
+2. Copy `.env.example` → `.env` and set:
+   - `TELEGRAM_BOT_TOKEN`
+   - `TELEGRAM_CHAT_ID`
+
+### Finding `TELEGRAM_CHAT_ID`
+
+Simplest ways:
+
+- Add your bot to the target group.
+- Send a message in the group, then call:
+  - `getUpdates`: `https://api.telegram.org/bot<YOUR_TOKEN>/getUpdates`
+  - Look for `"chat":{"id": ...}` in the JSON.
+
+Notes:
+- Group chat ids are typically negative and may look like `-1001234567890`.
+- If you use Telegram “Topics”, you can optionally set `TELEGRAM_MESSAGE_THREAD_ID` to send into a specific topic.
+
 ## Next steps
 
 - Connect the recognized text (e.g. "turn left", "look up", "blink") to **motor control** or other actions for your robot head.

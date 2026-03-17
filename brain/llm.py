@@ -228,6 +228,62 @@ LLM_TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "telegram_send_message",
+            "description": (
+                "Prepare a Telegram group message to be sent via the configured Telegram bot. "
+                "CRITICAL: This tool only PREPARES the message and asks for confirmation. "
+                "After calling it, you MUST read the message content aloud (in the user's language), "
+                "ask whether to send it (yes/no), and then call confirm_action(decision=...) based on the user's reply. "
+                "Use this when the user asks you to send/post something to Telegram."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "description": "Message text to send to the Telegram group.",
+                    },
+                    "parse_mode": {
+                        "type": "string",
+                        "description": "Optional. Telegram parse mode: 'MarkdownV2', 'Markdown', or 'HTML'.",
+                    },
+                    "disable_web_page_preview": {
+                        "type": "boolean",
+                        "description": "Optional. True to disable link previews.",
+                    },
+                },
+                "required": ["text"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "confirm_action",
+            "description": (
+                "Confirm or cancel a pending action after you asked the user for confirmation. "
+                "Use decision='yes' to proceed or decision='no' to cancel."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "decision": {
+                        "type": "string",
+                        "enum": ["yes", "no"],
+                        "description": "User confirmation: yes to proceed, no to cancel.",
+                    },
+                    "reason": {
+                        "type": "string",
+                        "description": "Optional short reason or context from the user.",
+                    },
+                },
+                "required": ["decision"],
+            },
+        },
+    },
 ]
 
 

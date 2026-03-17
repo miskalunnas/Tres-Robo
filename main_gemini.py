@@ -26,8 +26,12 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import numpy as np
+import requests
 import sounddevice as sd
-import webrtcvad
+try:
+    import webrtcvad  # type: ignore
+except Exception:  # pragma: no cover
+    webrtcvad = None
 
 from brain.gemini_live import GeminiLiveSession, GEMINI_SAMPLE_RATE_IN, GEMINI_SAMPLE_RATE_OUT
 from brain.llm import LLM_TOOLS, SYSTEM_PROMPT  # reuse existing tools + system prompt
@@ -140,6 +144,51 @@ def float32_to_pcm16(chunk: np.ndarray) -> bytes:
 _store = MemoryStore()
 _openai_client = None  # lazy-init for vision
 
+_PENDING_ACTION: dict | None = None
+
+
+def _telegram_send_message_http(
+    *,
+    text: str,
+    parse_mode: str | None = None,
+    disable_web_page_preview: bool | None = None,
+) -> str:
+    token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
+    thread_id = os.environ.get("TELEGRAM_MESSAGE_THREAD_ID", "").strip()
+    if not token:
+        return "Telegram token puuttuu. Lisää .env:iin TELEGRAM_BOT_TOKEN."
+    if not chat_id:
+        return "Telegram chat id puuttuu. Lisää .env:iin TELEGRAM_CHAT_ID."
+
+    payload: dict = {
+        "chat_id": chat_id,
+        "text": text,
+    }
+    if parse_mode:
+        payload["parse_mode"] = parse_mode
+    if disable_web_page_preview is not None:
+        payload["disable_web_page_preview"] = bool(disable_web_page_preview)
+    if thread_id:
+        # Optional: forum topic thread id in groups
+        try:
+            payload["message_thread_id"] = int(thread_id)
+        except ValueError:
+            return "TELEGRAM_MESSAGE_THREAD_ID on virheellinen (pitäisi olla numero)."
+
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    try:
+        r = requests.post(url, json=payload, timeout=10)
+    except Exception as exc:
+        return f"Telegram-lähetys epäonnistui: {exc}"
+
+    if r.status_code != 200:
+        body = (r.text or "").strip()
+        body = body[:500] + ("…" if len(body) > 500 else "")
+        return f"Telegram API error ({r.status_code}): {body}"
+
+    return "OK"
+
 
 def _get_openai_client():
     global _openai_client
@@ -155,6 +204,7 @@ def execute_tool(name: str, args: dict) -> str:
     Gemini will speak this result in the user's language naturally —
     no need to localise here.
     """
+    global _PENDING_ACTION
     if name == "play_music":
         from Tools.music import play_async, resolve_url, check_music_ready
         from Tools import _play_response_casual
@@ -231,6 +281,59 @@ def execute_tool(name: str, args: dict) -> str:
     if name == "end_conversation":
         # Handled as a side effect by the caller; just return the farewell text
         return args.get("farewell") or "Hei hei!"
+
+    if name == "telegram_send_message":
+        text = (args.get("text") or "").strip()
+        if not text:
+            return "Mitä haluat lähettää Telegramiin?"
+
+        parse_mode = (args.get("parse_mode") or "").strip() or None
+        if parse_mode not in (None, "MarkdownV2", "Markdown", "HTML"):
+            return "parse_mode pitää olla MarkdownV2, Markdown, HTML tai tyhjä."
+
+        disable_preview = args.get("disable_web_page_preview", None)
+        if disable_preview is not None:
+            disable_preview = bool(disable_preview)
+
+        _PENDING_ACTION = {
+            "type": "telegram_send_message",
+            "payload": {
+                "text": text,
+                "parse_mode": parse_mode,
+                "disable_web_page_preview": disable_preview,
+            },
+        }
+        # Gemini will speak this naturally; keep it explicit for voice confirmation.
+        return (
+            f"Olen lähettämässä Telegramiin tämän viestin: \"{text}\". "
+            "Lähetetäänkö? Sano kyllä tai ei."
+        )
+
+    if name == "confirm_action":
+        decision = (args.get("decision") or "").strip().lower()
+        if decision not in ("yes", "no"):
+            return "Vastaa yes/no."
+        if _PENDING_ACTION is None:
+            return "Ei ole mitään vahvistettavaa."
+
+        pending = _PENDING_ACTION
+        _PENDING_ACTION = None  # clear first to avoid double-sends on retries
+
+        if decision == "no":
+            return "Selvä. Peruin lähetyksen."
+
+        if pending.get("type") != "telegram_send_message":
+            return "Vahvistus epäonnistui: tuntematon pending-toiminto."
+
+        payload = pending.get("payload") or {}
+        result = _telegram_send_message_http(
+            text=str(payload.get("text") or ""),
+            parse_mode=payload.get("parse_mode"),
+            disable_web_page_preview=payload.get("disable_web_page_preview"),
+        )
+        if result == "OK":
+            return "Lähetetty Telegramiin."
+        return f"En saanut lähetettyä Telegramiin: {result}"
 
     return f"Unknown tool: {name}"
 
@@ -328,6 +431,11 @@ def listen_forever() -> None:
     print(f"[Mic] device={MIC_DEVICE} channels={MIC_CHANNELS} {native_sr} Hz")
     print(f"[Gemini] Model: {os.environ.get('GEMINI_LIVE_MODEL', 'gemini-live-2.5-flash-native-audio')}")
 
+    if webrtcvad is None:
+        raise RuntimeError(
+            "webrtcvad is not installed. Install dependencies from requirements.txt "
+            "(on Windows, you may need Microsoft C++ Build Tools)."
+        )
     vad = webrtcvad.Vad(VAD_AGGRESSIVENESS)
     audio_player = AudioPlayer(sample_rate=GEMINI_SAMPLE_RATE_OUT)
 
