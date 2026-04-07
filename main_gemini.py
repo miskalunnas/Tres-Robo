@@ -28,11 +28,12 @@ load_dotenv()
 import numpy as np
 
 try:
-    from face.display import FaceState, start_display, set_state as face_set
+    from face.display import FaceState, start_display, stop_display, set_state as face_set
     _face_enabled = True
 except Exception as _face_err:
     _face_enabled = False
     def face_set(state): pass  # no-op when display unavailable
+    def stop_display(): pass
     class FaceState:  # minimal stub
         IDLE = LISTENING = THINKING = SPEAKING = HAPPY = SAD = None
 import requests
@@ -646,6 +647,7 @@ def listen_forever() -> None:
             print("\nStopping.")
             end_session("shutdown")
             audio_player.shutdown()
+            stop_display()
 
 
 if __name__ == "__main__":

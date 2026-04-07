@@ -109,6 +109,13 @@ def start_display() -> None:
     _display.start()
 
 
+def stop_display() -> None:
+    if _display is not None:
+        _display.stop()
+        if _display._thread is not None:
+            _display._thread.join(timeout=2.0)
+
+
 # ── FaceDisplay ────────────────────────────────────────────────────────────────
 
 class FaceDisplay:
