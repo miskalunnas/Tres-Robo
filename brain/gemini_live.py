@@ -163,6 +163,16 @@ class GeminiLiveSession:
         except Exception:
             thinking_cfg = None
 
+        # Enable audio transcription if the SDK supports it (added in newer versions)
+        transcription_kwargs: dict = {}
+        try:
+            transcription_kwargs = {
+                "input_audio_transcription":  types.AudioTranscriptionConfig(),
+                "output_audio_transcription": types.AudioTranscriptionConfig(),
+            }
+        except AttributeError:
+            pass  # older SDK version — transcripts unavailable
+
         config = types.LiveConnectConfig(
             response_modalities=["AUDIO"],
             system_instruction=types.Content(
@@ -178,6 +188,7 @@ class GeminiLiveSession:
             ),
             generation_config=types.GenerationConfig(temperature=GEMINI_TEMPERATURE),
             **({} if thinking_cfg is None else {"thinking_config": thinking_cfg}),
+            **transcription_kwargs,
         )
         print(f"[Gemini] Temperature: {GEMINI_TEMPERATURE}")
 
@@ -196,6 +207,8 @@ class GeminiLiveSession:
                 msg = str(exc)
                 if "1008" in msg or "policy violation" in msg or "not found" in msg.lower():
                     print("[Gemini] Session ended by server (max duration reached) → going offline")
+                elif "1011" in msg:
+                    print("[Gemini] Server internal error (1011) — session dropped. Going offline.", file=sys.stderr)
                 else:
                     print(f"[Gemini] Session error: {exc}", file=sys.stderr)
 

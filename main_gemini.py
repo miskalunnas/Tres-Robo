@@ -317,11 +317,10 @@ def execute_tool(name: str, args: dict) -> str:
                 "disable_web_page_preview": disable_preview,
             },
         }
-        # Gemini will speak this naturally; keep it explicit for voice confirmation.
-        return (
-            f"Olen lähettämässä Telegramiin tämän viestin: \"{text}\". "
-            "Lähetetäänkö? Sano kyllä tai ei."
-        )
+        # Keep the tool response short — long strings going back to Gemini
+        # can trigger 1011 server errors on the Live API.
+        preview = text[:80] + ("…" if len(text) > 80 else "")
+        return f"Viesti valmis: \"{preview}\". Lähetetäänkö? Kysy käyttäjältä kyllä/ei."
 
     if name == "confirm_action":
         decision = (args.get("decision") or "").strip().lower()
