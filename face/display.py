@@ -39,7 +39,7 @@ _GOLD = (255, 190, 50)
 _BLUE = (60, 80, 255)
 
 _ROOT       = Path(__file__).resolve().parent.parent
-_LOGO_PATH  = _ROOT / "face" / "assets" / "logo.png"
+_LOGO_PATH  = _ROOT / "face" / "assets" / "logo.svg"
 
 _EMOTION_DURATION  = 2.5   # seconds before HAPPY/SAD reverts
 _QUOTE_INTERVAL    = 14.0  # seconds each quote is shown
@@ -244,7 +244,10 @@ class FaceDisplay:
             print(f"[Face] Logo not found at {_LOGO_PATH} — skipping.", file=sys.stderr)
             return None
         try:
-            surf = pygame.image.load(str(_LOGO_PATH)).convert_alpha()
+            import io
+            import cairosvg
+            png_bytes = cairosvg.svg2png(url=str(_LOGO_PATH))
+            surf = pygame.image.load(io.BytesIO(png_bytes)).convert_alpha()
             # Scale to max 220 px wide, keeping aspect ratio
             ow, oh = surf.get_size()
             scale = min(220 / ow, 100 / oh)

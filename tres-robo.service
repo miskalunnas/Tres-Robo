@@ -10,6 +10,8 @@ ExecStart=%h/Tres-Robo/.venv/bin/python main_gemini.py
 Restart=always
 RestartSec=5
 EnvironmentFile=%h/Tres-Robo/.env
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=%h/.Xauthority
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=tres-robo

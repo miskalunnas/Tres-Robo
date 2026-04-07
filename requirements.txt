@@ -29,3 +29,5 @@ yt-dlp
 # pip install face_recognition
 
 setuptools
+pygame
+cairosvg

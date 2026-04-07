@@ -26,6 +26,15 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import numpy as np
+
+try:
+    from face.display import FaceState, start_display, set_state as face_set
+    _face_enabled = True
+except Exception as _face_err:
+    _face_enabled = False
+    def face_set(state): pass  # no-op when display unavailable
+    class FaceState:  # minimal stub
+        IDLE = LISTENING = THINKING = SPEAKING = HAPPY = SAD = None
 import requests
 import sounddevice as sd
 try:
@@ -428,6 +437,10 @@ def listen_forever() -> None:
     frame_seconds = VAD_FRAME_DURATION_MS / 1000.0
     vad_frame_len = int(VAD_SAMPLE_RATE * VAD_FRAME_DURATION_MS / 1000)
 
+    if _face_enabled:
+        start_display()
+        face_set(FaceState.IDLE)
+
     print(f"[Mic] device={MIC_DEVICE} channels={MIC_CHANNELS} {native_sr} Hz")
     print(f"[Gemini] Model: {os.environ.get('GEMINI_LIVE_MODEL', 'gemini-live-2.5-flash-native-audio')}")
 
@@ -461,6 +474,7 @@ def listen_forever() -> None:
 
     def on_audio_out(pcm_bytes: bytes) -> None:
         state["last_audio_out"] = time.monotonic()
+        face_set(FaceState.SPEAKING)
         audio_player.play(pcm_bytes)
 
     def on_tool_call(name: str, args: dict) -> str:
@@ -471,6 +485,7 @@ def listen_forever() -> None:
 
     def on_session_end() -> None:
         print("[Gemini] Session ended → OFFLINE")
+        face_set(FaceState.IDLE)
         state["online"] = False
         state["session"] = None
         state["session_closed_at"] = time.monotonic()
@@ -510,6 +525,7 @@ def listen_forever() -> None:
         state["last_audio_out"] = time.monotonic()
         state["last_audio_in"] = time.monotonic()
         state["end_requested"] = False
+        face_set(FaceState.THINKING)
 
         # Run vision in background — inject context once camera finishes
         # so the session opens immediately without waiting for the camera.
@@ -522,6 +538,7 @@ def listen_forever() -> None:
 
     def end_session(reason: str = "timeout") -> None:
         print(f"[Engine] → OFFLINE ({reason})")
+        face_set(FaceState.IDLE)
         audio_player.stop()
         session = state["session"]
         if session:
@@ -570,6 +587,9 @@ def listen_forever() -> None:
                 if state["online"]:
                     # ── ONLINE: stream raw audio to Gemini ───────────────────
                     session = state["session"]
+                    # Switch face to LISTENING once bot stops speaking
+                    if not audio_player.recently_played(cooldown=0.5):
+                        face_set(FaceState.LISTENING)
                     # Suppress mic while bot is speaking (queue busy) OR just
                     # finished (cooldown covers paplay's internal buffer drain).
                     if session and not audio_player.recently_played(cooldown=0.5):
