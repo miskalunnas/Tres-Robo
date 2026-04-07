@@ -327,15 +327,18 @@ def execute_tool(name: str, args: dict) -> str:
         if decision not in ("yes", "no"):
             return "Vastaa yes/no."
         if _PENDING_ACTION is None:
+            print("[Telegram] confirm_action called but nothing was staged — telegram_send_message was not called first.", file=sys.stderr)
             return "Ei ole mitään vahvistettavaa."
 
         pending = _PENDING_ACTION
         _PENDING_ACTION = None  # clear first to avoid double-sends on retries
 
         if decision == "no":
+            print("[Telegram] Send cancelled by user.")
             return "Selvä. Peruin lähetyksen."
 
         if pending.get("type") != "telegram_send_message":
+            print(f"[Telegram] Unknown pending action type: {pending.get('type')}", file=sys.stderr)
             return "Vahvistus epäonnistui: tuntematon pending-toiminto."
 
         payload = pending.get("payload") or {}
@@ -345,7 +348,9 @@ def execute_tool(name: str, args: dict) -> str:
             disable_web_page_preview=payload.get("disable_web_page_preview"),
         )
         if result == "OK":
+            print("[Telegram] Message sent successfully.")
             return "Lähetetty Telegramiin."
+        print(f"[Telegram] Send failed: {result}", file=sys.stderr)
         return f"En saanut lähetettyä Telegramiin: {result}"
 
     return f"Unknown tool: {name}"
