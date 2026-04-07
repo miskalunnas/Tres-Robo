@@ -221,7 +221,13 @@ LLM_TOOLS = [
                 "properties": {
                     "farewell": {
                         "type": "string",
-                        "description": "Short farewell in the user's language, e.g. 'Hei hei!', 'Moikka!', 'See you!', 'Catch you later!'",
+                        "description": (
+                            "Short farewell that fits the mood and language of the conversation. "
+                            "Vary it — never repeat the same phrase twice in a row. "
+                            "Finnish examples: 'Hei hei!', 'Nähdään!', 'Pidetään yhteystiedot!', 'Menestystä!', 'Selvä, heippa!', 'Palataan asiaan!', 'Tsemppiä!', 'Siisti, heippa!', 'Ota rennosti!'. "
+                            "English examples: 'See you!', 'Take care!', 'Catch you later!', 'Good luck!', 'Have a great one!', 'Until next time!', 'Stay sharp!', 'Onwards!', 'Go get it!'. "
+                            "Match the energy — casual if the chat was casual, warm if the user seemed stressed, upbeat if something exciting was discussed."
+                        ),
                     }
                 },
                 "required": ["farewell"],
