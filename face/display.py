@@ -392,7 +392,7 @@ class FaceDisplay:
             color    = tuple(int(v * fade) for v in _CYAN)
 
         elif state == FaceState.THINKING:
-            eye_shift = int(7 * math.sin(t * 2.2))
+            eye_shift = int(12 * math.sin(t * 2.2))
 
         elif state == FaceState.SPEAKING:
             pulse       = abs(math.sin(t * 9.0))
@@ -401,12 +401,12 @@ class FaceDisplay:
         if state != FaceState.IDLE and self._blink_t > 0:
             eye_open = float(eye_open) * (1.0 - self._blink_t)
 
-        EYE_W     = 72
-        EYE_H     = 56
-        EYE_SPACE = 112
-        EYE_Y     = CY - 28
-        MOUTH_Y   = CY + 85
-        MOUTH_W   = 130
+        EYE_W     = 130
+        EYE_H     = 100
+        EYE_SPACE = 190
+        EYE_Y     = CY - 50
+        MOUTH_Y   = CY + 120
+        MOUTH_W   = 240
 
         lx = CX - EYE_SPACE + eye_shift
         rx = CX + EYE_SPACE + eye_shift
@@ -424,33 +424,33 @@ class FaceDisplay:
 
     # ── drawing primitives ─────────────────────────────────────────────────────
 
-    def _draw_eye(self, surf, cx, cy, w, h, openness, brow, color, line=3):
+    def _draw_eye(self, surf, cx, cy, w, h, openness, brow, color, line=5):
         import pygame
         eye_h = max(2, int(h * openness))
-        if eye_h <= 4:
-            pygame.draw.line(surf, color, (cx - w // 2, cy), (cx + w // 2, cy), 3)
+        if eye_h <= 6:
+            pygame.draw.line(surf, color, (cx - w // 2, cy), (cx + w // 2, cy), 5)
         else:
             rect = pygame.Rect(cx - w // 2, cy - eye_h // 2, w, eye_h)
             pygame.draw.ellipse(surf, color, rect, line)
             if openness > 0.35:
-                pr = max(3, int(min(w, eye_h) * 0.22))
+                pr = max(5, int(min(w, eye_h) * 0.22))
                 pygame.draw.circle(surf, color, (cx, cy), pr)
-        brow_base_y = cy - eye_h // 2 - 14
+        brow_base_y = cy - eye_h // 2 - 18
         brow_pts = [
-            (cx - w // 2 + 6, brow_base_y - int(brow * 5)),
-            (cx,              brow_base_y - int(brow * 12)),
-            (cx + w // 2 - 6, brow_base_y - int(brow * 5)),
+            (cx - w // 2 + 8, brow_base_y - int(brow * 7)),
+            (cx,              brow_base_y - int(brow * 16)),
+            (cx + w // 2 - 8, brow_base_y - int(brow * 7)),
         ]
-        pygame.draw.lines(surf, color, False, brow_pts, 2)
+        pygame.draw.lines(surf, color, False, brow_pts, 4)
 
-    def _draw_mouth(self, surf, cx, cy, w, curve, color, line=4):
+    def _draw_mouth(self, surf, cx, cy, w, curve, color, line=6):
         import pygame
         pts = []
         half = w // 2
         for i in range(41):
             frac = i / 40
             x = cx - half + int(w * frac)
-            y = cy - int(curve * math.sin(math.pi * frac))
+            y = cy + int(curve * math.sin(math.pi * frac))
             pts.append((x, y))
         if len(pts) > 1:
             pygame.draw.lines(surf, color, False, pts, line)
@@ -459,16 +459,16 @@ class FaceDisplay:
         import pygame
         for i in range(3):
             phase = (t * 2.5 + i * 0.45) % (math.pi * 2)
-            y_off = int(7 * math.sin(phase))
+            y_off = int(12 * math.sin(phase))
             alpha = 0.45 + 0.55 * ((math.sin(phase) + 1) / 2)
             c     = tuple(int(v * alpha) for v in color)
-            pygame.draw.circle(surf, c, (cx - 26 + i * 26, cy + y_off), 8)
+            pygame.draw.circle(surf, c, (cx - 40 + i * 40, cy + y_off), 13)
 
     def _draw_sparkles(self, surf, t, color):
         import pygame
         for i in range(7):
             angle = t * 1.3 + i * (math.pi * 2 / 7)
-            r     = 185 + int(18 * math.sin(t * 2.1 + i))
+            r     = 240 + int(18 * math.sin(t * 2.1 + i))
             x     = int(CX + r * math.cos(angle))
             y     = int(CY + r * 0.55 * math.sin(angle))
             size  = max(1, 3 + int(2 * math.sin(t * 3.5 + i)))
