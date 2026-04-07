@@ -239,11 +239,14 @@ LLM_TOOLS = [
         "function": {
             "name": "telegram_send_message",
             "description": (
-                "Prepare a Telegram group message to be sent via the configured Telegram bot. "
-                "CRITICAL: This tool only PREPARES the message and asks for confirmation. "
-                "After calling it, you MUST read the message content aloud (in the user's language), "
-                "ask whether to send it (yes/no), and then call confirm_action(decision=...) based on the user's reply. "
-                "Use this when the user asks you to send/post something to Telegram."
+                "Stage a message to be sent to the TRES Telegram group. "
+                "REQUIRED SEQUENCE — do NOT skip any step: "
+                "1) Call this tool with the message text to stage it. "
+                "2) Read the message aloud to the user. "
+                "3) Ask the user to confirm (yes/no). "
+                "4) Call confirm_action(decision='yes' or 'no') based on the reply. "
+                "NEVER call confirm_action without having called this tool first in the same turn. "
+                "NEVER ask for confirmation verbally without calling this tool first."
             ),
             "parameters": {
                 "type": "object",
@@ -270,8 +273,10 @@ LLM_TOOLS = [
         "function": {
             "name": "confirm_action",
             "description": (
-                "Confirm or cancel a pending action after you asked the user for confirmation. "
-                "Use decision='yes' to proceed or decision='no' to cancel."
+                "Confirm or cancel a pending action. "
+                "ONLY call this after telegram_send_message has already been called in this session — "
+                "it will fail silently if no message has been staged first. "
+                "Use decision='yes' to send or decision='no' to cancel."
             ),
             "parameters": {
                 "type": "object",
