@@ -249,6 +249,8 @@ class GeminiLiveSession:
         """Receive audio output and tool calls from Gemini (multi-turn)."""
         audio_chunk_count = 0
         msg_count = 0
+        user_buf: list[str] = []
+        bot_buf:  list[str] = []
         try:
             while not self._closed:
                 async for response in session.receive():
@@ -256,24 +258,47 @@ class GeminiLiveSession:
                         break
                     msg_count += 1
 
-                    # Extract audio: try response.data first, then inline_data
+                    # Always extract server_content — needed for audio, transcripts, and turn state
+                    sc = getattr(response, "server_content", None)
+
+                    # Extract audio: try response.data first, then inline_data inside model_turn
                     audio_data = getattr(response, "data", None)
-                    if not audio_data:
-                        sc = getattr(response, "server_content", None)
-                        if sc:
-                            model_turn = getattr(sc, "model_turn", None)
-                            if model_turn:
-                                for part in getattr(model_turn, "parts", []) or []:
-                                    inline = getattr(part, "inline_data", None)
-                                    if inline and getattr(inline, "data", None):
-                                        audio_data = inline.data
-                                        break
+                    if not audio_data and sc:
+                        model_turn = getattr(sc, "model_turn", None)
+                        if model_turn:
+                            for part in getattr(model_turn, "parts", []) or []:
+                                inline = getattr(part, "inline_data", None)
+                                if inline and getattr(inline, "data", None):
+                                    audio_data = inline.data
+                                    break
 
                     if audio_data:
                         audio_chunk_count += 1
                         if audio_chunk_count in (1, 10, 100):
                             print(f"[Gemini] Audio out chunk #{audio_chunk_count} ({len(audio_data)} bytes)")
                         self._audio_out_handler(audio_data)
+
+                    # Transcripts
+                    if sc:
+                        in_t = getattr(sc, "input_transcription", None)
+                        if in_t:
+                            txt = getattr(in_t, "text", None)
+                            if txt:
+                                user_buf.append(txt)
+
+                        out_t = getattr(sc, "output_transcription", None)
+                        if out_t:
+                            txt = getattr(out_t, "text", None)
+                            if txt:
+                                bot_buf.append(txt)
+
+                        if getattr(sc, "turn_complete", False):
+                            if user_buf:
+                                print(f"[User] {''.join(user_buf)}")
+                                user_buf.clear()
+                            if bot_buf:
+                                print(f"[Bot]  {''.join(bot_buf)}")
+                                bot_buf.clear()
 
                     # Tool calls
                     tool_call = getattr(response, "tool_call", None)
@@ -284,6 +309,10 @@ class GeminiLiveSession:
             if not self._closed:
                 print(f"[Gemini] Receive error: {exc}", file=sys.stderr)
         finally:
+            if user_buf:
+                print(f"[User] {''.join(user_buf)}")
+            if bot_buf:
+                print(f"[Bot]  {''.join(bot_buf)}")
             print(f"[Gemini] Receive loop ended. Messages: {msg_count}, audio chunks: {audio_chunk_count}")
 
     async def _handle_tool_calls(self, session, tool_call) -> None:
