@@ -187,11 +187,15 @@ def _telegram_send_message_http(
             return "TELEGRAM_MESSAGE_THREAD_ID on virheellinen (pitäisi olla numero)."
 
     url = f"https://api.telegram.org/bot{token}/sendMessage"
+    print(f"[Telegram] POST {url}")
+    print(f"[Telegram] Payload: {payload}")
     try:
         r = requests.post(url, json=payload, timeout=10)
     except Exception as exc:
+        print(f"[Telegram] Request failed: {exc}", file=sys.stderr)
         return f"Telegram-lähetys epäonnistui: {exc}"
 
+    print(f"[Telegram] Response {r.status_code}: {r.text[:300]}")
     if r.status_code != 200:
         body = (r.text or "").strip()
         body = body[:500] + ("…" if len(body) > 500 else "")
@@ -648,6 +652,10 @@ def listen_forever() -> None:
             end_session("shutdown")
             audio_player.shutdown()
             stop_display()
+        except Exception:
+            audio_player.shutdown()
+            stop_display()
+            raise
 
 
 if __name__ == "__main__":
