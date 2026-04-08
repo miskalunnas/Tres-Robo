@@ -59,6 +59,7 @@ except Exception:  # pragma: no cover
 from brain.gemini_live import GeminiLiveSession, GEMINI_SAMPLE_RATE_IN, GEMINI_SAMPLE_RATE_OUT
 from brain.llm import LLM_TOOLS, SYSTEM_PROMPT  # reuse existing tools + system prompt
 from voice.audio_out import AudioPlayer
+from voice.doa import DOAEstimator
 from memory.store import MemoryStore
 from voice import stt_openai
 
@@ -486,13 +487,17 @@ def listen_forever() -> None:
             while True:
                 try:
                     val = lgpio.gpio_read(_gpio_handle, _MUTE_GPIO_PIN)
-                except Exception:
+                except Exception as exc:
+                    print(f"[Mute] GPIO read error: {exc}", file=sys.stderr)
                     break
+
                 if val == 0 and prev == 1:  # falling edge
                     now_t = time.monotonic()
                     if now_t - _last_press[0] >= _GPIO_DEBOUNCE_S:
                         _last_press[0] = now_t
                         _on_button_press(None)
+                    else:
+                        print(f"[Mute] Debounced (too fast)")
                 prev = val
                 time.sleep(0.02)  # 20 ms poll interval
 
@@ -511,6 +516,7 @@ def listen_forever() -> None:
         )
     vad = webrtcvad.Vad(VAD_AGGRESSIVENESS)
     audio_player = AudioPlayer(sample_rate=GEMINI_SAMPLE_RATE_OUT)
+    doa = DOAEstimator(sample_rate=native_sr)
 
     # Mutable state (using a dict so closures can modify)
     state = {
@@ -646,6 +652,10 @@ def listen_forever() -> None:
 
                 if muted.is_set():
                     continue  # drop all audio while muted
+
+                # DOA — feed raw stereo frame, skip while bot is speaking
+                if not audio_player.recently_played(cooldown=0.5):
+                    doa.push(chunk)
 
                 if state["online"]:
                     # ── ONLINE: stream raw audio to Gemini ───────────────────

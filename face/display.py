@@ -362,13 +362,14 @@ class FaceDisplay:
 
     def _draw_muted_screen(self, screen, pygame, t, logo_surf, font):
         """Full-screen muted overlay: logo centered + unmute instruction."""
-        # Logo — centered vertically, pulse gently
+        # Logo — 4x bigger than normal, centered, gentle pulse
         if logo_surf is not None:
+            lw, lh = logo_surf.get_size()
+            big = pygame.transform.smoothscale(logo_surf, (lw * 4, lh * 4))
             pulse = 0.6 + 0.15 * math.sin(t * 0.6)
-            logo = logo_surf.copy()
-            logo.set_alpha(int(255 * pulse))
-            lw, lh = logo.get_size()
-            screen.blit(logo, (CX - lw // 2, CY - lh // 2 - 50))
+            big.set_alpha(int(255 * pulse))
+            bw, bh = big.get_size()
+            screen.blit(big, (CX - bw // 2, CY - bh // 2 - 50))
 
         # Unmute instruction
         msg = "Unmute Founderbot by pressing the button"
