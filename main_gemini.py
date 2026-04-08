@@ -39,15 +39,16 @@ except Exception as _face_err:
 
 # ── GPIO mute button ───────────────────────────────────────────────────────────
 _MUTE_GPIO_PIN = int(os.environ.get("MUTE_GPIO_PIN", "17"))
-_GPIO_DEBOUNCE_MS = 250  # milliseconds
+_GPIO_DEBOUNCE_S = 0.25  # seconds
 
 try:
-    import RPi.GPIO as GPIO  # type: ignore[import]
-    GPIO.setmode(GPIO.BCM)
-    GPIO.setup(_MUTE_GPIO_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+    import lgpio  # type: ignore[import]
+    _gpio_handle = lgpio.gpiochip_open(0)
+    lgpio.gpio_claim_input(_gpio_handle, _MUTE_GPIO_PIN, lgpio.SET_PULL_UP)
     _gpio_available = True
-except Exception:
+except Exception as _gpio_err:
     _gpio_available = False
+    _gpio_handle = None
 import requests
 import sounddevice as sd
 try:
@@ -478,15 +479,27 @@ def listen_forever() -> None:
             face_set(FaceState.MUTED)
 
     if _gpio_available:
-        GPIO.add_event_detect(
-            _MUTE_GPIO_PIN,
-            GPIO.FALLING,
-            callback=_on_button_press,
-            bouncetime=_GPIO_DEBOUNCE_MS,
-        )
+        _last_press = [0.0]
+
+        def _gpio_poll():
+            prev = 1  # pulled high = unpressed
+            while True:
+                try:
+                    val = lgpio.gpio_read(_gpio_handle, _MUTE_GPIO_PIN)
+                except Exception:
+                    break
+                if val == 0 and prev == 1:  # falling edge
+                    now_t = time.monotonic()
+                    if now_t - _last_press[0] >= _GPIO_DEBOUNCE_S:
+                        _last_press[0] = now_t
+                        _on_button_press(None)
+                prev = val
+                time.sleep(0.02)  # 20 ms poll interval
+
+        threading.Thread(target=_gpio_poll, daemon=True, name="gpio-poll").start()
         print(f"[Mute] Button ready on GPIO {_MUTE_GPIO_PIN}.")
     else:
-        print("[Mute] RPi.GPIO not available — mute button disabled.", file=sys.stderr)
+        print("[Mute] lgpio not available — mute button disabled.", file=sys.stderr)
 
     print(f"[Mic] device={MIC_DEVICE} channels={MIC_CHANNELS} {native_sr} Hz")
     print(f"[Gemini] Model: {os.environ.get('GEMINI_LIVE_MODEL', 'gemini-live-2.5-flash-native-audio')}")
@@ -698,12 +711,12 @@ def listen_forever() -> None:
             audio_player.shutdown()
             stop_display()
             if _gpio_available:
-                GPIO.cleanup()
+                lgpio.gpiochip_close(_gpio_handle)
         except Exception:
             audio_player.shutdown()
             stop_display()
             if _gpio_available:
-                GPIO.cleanup()
+                lgpio.gpiochip_close(_gpio_handle)
             raise
 
 
