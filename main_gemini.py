@@ -35,7 +35,19 @@ except Exception as _face_err:
     def face_set(state): pass  # no-op when display unavailable
     def stop_display(): pass
     class FaceState:  # minimal stub
-        IDLE = LISTENING = THINKING = SPEAKING = HAPPY = SAD = None
+        IDLE = LISTENING = THINKING = SPEAKING = HAPPY = SAD = MUTED = None
+
+# ── GPIO mute button ───────────────────────────────────────────────────────────
+_MUTE_GPIO_PIN = int(os.environ.get("MUTE_GPIO_PIN", "17"))
+_GPIO_DEBOUNCE_MS = 250  # milliseconds
+
+try:
+    import RPi.GPIO as GPIO  # type: ignore[import]
+    GPIO.setmode(GPIO.BCM)
+    GPIO.setup(_MUTE_GPIO_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+    _gpio_available = True
+except Exception:
+    _gpio_available = False
 import requests
 import sounddevice as sd
 try:
@@ -450,6 +462,32 @@ def listen_forever() -> None:
         start_display()
         face_set(FaceState.IDLE)
 
+    # ── Mute state ─────────────────────────────────────────────────────────────
+    muted = threading.Event()  # set = muted, clear = active
+
+    def _on_button_press(channel):
+        if muted.is_set():
+            muted.clear()
+            print("[Mute] Unmuted.")
+            face_set(FaceState.IDLE)
+        else:
+            muted.set()
+            print("[Mute] Muted.")
+            if state["online"]:
+                end_session("muted")
+            face_set(FaceState.MUTED)
+
+    if _gpio_available:
+        GPIO.add_event_detect(
+            _MUTE_GPIO_PIN,
+            GPIO.FALLING,
+            callback=_on_button_press,
+            bouncetime=_GPIO_DEBOUNCE_MS,
+        )
+        print(f"[Mute] Button ready on GPIO {_MUTE_GPIO_PIN}.")
+    else:
+        print("[Mute] RPi.GPIO not available — mute button disabled.", file=sys.stderr)
+
     print(f"[Mic] device={MIC_DEVICE} channels={MIC_CHANNELS} {native_sr} Hz")
     print(f"[Gemini] Model: {os.environ.get('GEMINI_LIVE_MODEL', 'gemini-live-2.5-flash-native-audio')}")
 
@@ -593,6 +631,9 @@ def listen_forever() -> None:
                 else:
                     mono = chunk
 
+                if muted.is_set():
+                    continue  # drop all audio while muted
+
                 if state["online"]:
                     # ── ONLINE: stream raw audio to Gemini ───────────────────
                     session = state["session"]
@@ -656,9 +697,13 @@ def listen_forever() -> None:
             end_session("shutdown")
             audio_player.shutdown()
             stop_display()
+            if _gpio_available:
+                GPIO.cleanup()
         except Exception:
             audio_player.shutdown()
             stop_display()
+            if _gpio_available:
+                GPIO.cleanup()
             raise
 
 

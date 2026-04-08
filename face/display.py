@@ -79,6 +79,7 @@ class FaceState(Enum):
     SPEAKING  = "speaking"
     HAPPY     = "happy"
     SAD       = "sad"
+    MUTED     = "muted"
 
 
 # ── Per-state base parameters ──────────────────────────────────────────────────
@@ -90,6 +91,7 @@ _PARAMS: dict[FaceState, dict] = {
     FaceState.SPEAKING:  dict(eye_open=0.85, brow= 0.1, mouth= 18, color=_CYAN),
     FaceState.HAPPY:     dict(eye_open=0.45, brow= 0.5, mouth= 45, color=_GOLD),
     FaceState.SAD:       dict(eye_open=0.55, brow=-0.4, mouth=-38, color=_BLUE),
+    FaceState.MUTED:     dict(eye_open=0.10, brow= 0.0, mouth=  0, color=_DIM),
 }
 
 
@@ -207,12 +209,16 @@ class FaceDisplay:
                 idle_alpha = 0.0
 
             screen.fill(_BG)
-            self._draw(screen, t, state, prev_state, blend)
 
-            if idle_alpha > 0.01:
-                self._draw_idle_overlay(
-                    screen, pygame, t, logo_surf, quote_font, author_font, idle_alpha
-                )
+            if state == FaceState.MUTED:
+                self._draw_muted_screen(screen, pygame, t, logo_surf, quote_font)
+            else:
+                self._draw(screen, t, state, prev_state, blend)
+
+                if idle_alpha > 0.01:
+                    self._draw_idle_overlay(
+                        screen, pygame, t, logo_surf, quote_font, author_font, idle_alpha
+                    )
 
             pygame.display.flip()
             clock.tick(FPS)
@@ -352,6 +358,28 @@ class FaceDisplay:
             alpha=q_alpha,
             y=H - 68,
             max_width=680,
+        )
+
+    def _draw_muted_screen(self, screen, pygame, t, logo_surf, font):
+        """Full-screen muted overlay: logo centered + unmute instruction."""
+        # Logo — centered vertically, pulse gently
+        if logo_surf is not None:
+            pulse = 0.6 + 0.15 * math.sin(t * 0.6)
+            logo = logo_surf.copy()
+            logo.set_alpha(int(255 * pulse))
+            lw, lh = logo.get_size()
+            screen.blit(logo, (CX - lw // 2, CY - lh // 2 - 50))
+
+        # Unmute instruction
+        msg = "Unmute Founderbot by pressing the button"
+        dim_white = (160, 160, 160)
+        self._draw_centered_text(
+            screen, pygame, font,
+            text=msg,
+            color=dim_white,
+            alpha=0.55 + 0.20 * math.sin(t * 0.9),
+            y=CY + 60,
+            max_width=700,
         )
 
     def _draw_centered_text(self, screen, pygame, font, text, color, alpha, y, max_width):
