@@ -112,11 +112,11 @@ VAD_FRAME_DURATION_MS = int(_vad_frame_ms) if _vad_frame_ms.isdigit() and int(_v
 
 # Offline segmentation thresholds
 MIN_SEGMENT_WHEN_OFFLINE = 0.25
-MAX_SILENCE_WHEN_OFFLINE = 0.6
+MAX_SILENCE_WHEN_OFFLINE = 0.8
 MAX_SEGMENT_OFFLINE = 8.0
 
 # Session inactivity: close if Gemini hasn't produced audio for this long
-INACTIVITY_TIMEOUT_SECONDS = 30.0
+INACTIVITY_TIMEOUT_SECONDS = 20.0
 
 try:
     MIC_GAIN = float(os.environ.get("MIC_GAIN", "1.5").strip())

@@ -1,9 +1,103 @@
 """Menu checker tool for Hervanta campus lunch menus via Unisafka."""
 
 import sys
-from datetime import date
+from datetime import date, datetime, time
 
 import requests
+
+try:
+    from zoneinfo import ZoneInfo
+    _TZ = ZoneInfo("Europe/Helsinki")
+except ImportError:
+    # Python < 3.9 fallback
+    try:
+        import pytz
+        _TZ = pytz.timezone("Europe/Helsinki")
+    except ImportError:
+        _TZ = None  # fall back to local system time
+
+# ── Opening hours (local Tampere/Helsinki time) ───────────────────────────────
+# Format: weekday index (0=Mon … 6=Sun) → (open_time, close_time) or None if closed.
+# Adjust these if the restaurants change their hours.
+_OPENING_HOURS: dict[str, dict[int, tuple[time, time] | None]] = {
+    "reaktori": {
+        0: (time(10, 30), time(14, 30)),  # Mon
+        1: (time(10, 30), time(14, 30)),  # Tue
+        2: (time(10, 30), time(14, 30)),  # Wed
+        3: (time(10, 30), time(14, 30)),  # Thu
+        4: (time(10, 30), time(14, 30)),  # Fri
+        5: None,                           # Sat — closed
+        6: None,                           # Sun — closed
+    },
+    "newton": {
+        0: (time(10, 30), time(14, 00)),
+        1: (time(10, 30), time(14, 00)),
+        2: (time(10, 30), time(14, 00)),
+        3: (time(10, 30), time(14, 00)),
+        4: (time(10, 30), time(14, 00)),
+        5: None,
+        6: None,
+    },
+    "konehuone": {
+        0: (time(10, 30), time(14, 00)),
+        1: (time(10, 30), time(14, 00)),
+        2: (time(10, 30), time(14, 00)),
+        3: (time(10, 30), time(14, 00)),
+        4: (time(10, 30), time(14, 00)),
+        5: None,
+        6: None,
+    },
+    "hertsi": {
+        0: (time(10, 30), time(14, 00)),
+        1: (time(10, 30), time(14, 00)),
+        2: (time(10, 30), time(14, 00)),
+        3: (time(10, 30), time(14, 00)),
+        4: (time(10, 30), time(14, 00)),
+        5: None,
+        6: None,
+    },
+}
+
+_CLOSING_SOON_MINUTES = 30  # warn when this many minutes or fewer remain
+
+
+def _now_local() -> datetime:
+    """Current datetime in Helsinki timezone (falls back to system local time)."""
+    if _TZ is not None:
+        return datetime.now(_TZ)
+    return datetime.now()
+
+
+def _opening_status(key: str) -> str:
+    """Return a human-readable open/closed status string for *key*."""
+    hours = _OPENING_HOURS.get(key)
+    if hours is None:
+        return ""
+
+    now = _now_local()
+    today_hours = hours.get(now.weekday())
+
+    if today_hours is None:
+        return "Closed today."
+
+    open_t, close_t = today_hours
+    open_dt  = now.replace(hour=open_t.hour,  minute=open_t.minute,  second=0, microsecond=0)
+    close_dt = now.replace(hour=close_t.hour, minute=close_t.minute, second=0, microsecond=0)
+
+    if now < open_dt:
+        opens_in = int((open_dt - now).total_seconds() // 60)
+        return f"Not open yet — opens at {open_t.strftime('%H:%M')} ({opens_in} min from now)."
+
+    if now > close_dt:
+        return f"Closed for today (was open {open_t.strftime('%H:%M')}–{close_t.strftime('%H:%M')})."
+
+    minutes_left = int((close_dt - now).total_seconds() // 60)
+    if minutes_left <= _CLOSING_SOON_MINUTES:
+        return (
+            f"Open now until {close_t.strftime('%H:%M')} — "
+            f"only {minutes_left} minutes left!"
+        )
+    return f"Open now until {close_t.strftime('%H:%M')} ({minutes_left} min remaining)."
 
 UNISAFKA_BASE = "https://unisafka.fi/static/json"
 CAMPUS = "tty"
@@ -271,8 +365,9 @@ def get_menu(restaurant: str) -> str:
             body = "ei listaa"
     else:
         body = "ei listaa"
+    status = _opening_status(key)
     header = f"Päivämäärä: {spoken}.\n{display}:"
-    return f"{header}\n{body}"
+    return f"{header}\n{body}\nStatus: {status}"
 
 
 def get_all_menus() -> str:
@@ -309,6 +404,11 @@ def get_all_menus() -> str:
                 parts.append(f"{display}: closed tai ei listaa")
         else:
             parts.append(f"{display}: ei listaa")
+
+        status = _opening_status(key)
+        if status:
+            parts[-1] += f" [{status}]"
+
     header = f"Päivämäärä: {spoken}."
     return header + "\n\n" + "\n".join(parts)
 

@@ -206,17 +206,19 @@ class FaceTracker:
                             print("[FaceTracker] Camera opened — no detector available (no IMX500, no OpenCV)")
 
                     while self._active.is_set() and not self._stop.is_set():
-
-                        # Pause gate inside inner loop
                         if self._pause_req.is_set():
-                            self._paused.set()
-                            while self._pause_req.is_set() and not self._stop.is_set():
-                                time.sleep(0.05)
-                            self._paused.clear()
-                            break  # close camera → outer loop re-opens
-
+                            break  # exit inner loop → with-block closes camera below
                         self._track_once(cam, haar)
                         time.sleep(_INTERVAL_S)
+
+                # Camera is now physically closed — safe to signal the caller.
+                if self._pause_req.is_set():
+                    print("[FaceTracker] Camera released — handing over to see tool")
+                    self._paused.set()
+                    while self._pause_req.is_set() and not self._stop.is_set():
+                        time.sleep(0.05)
+                    self._paused.clear()
+                    print("[FaceTracker] Resuming tracking")
 
             except Exception as exc:
                 logger.warning("[FaceTracker] Camera error: %s — retrying in 1.5 s", exc)
