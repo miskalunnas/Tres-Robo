@@ -49,6 +49,20 @@ try:
 except Exception as _gpio_err:
     _gpio_available = False
     _gpio_handle = None
+
+# ── Pan/tilt head tracking ─────────────────────────────────────────────────────
+try:
+    from hardware.servo import ServoController
+    from vision.face_tracker import FaceTracker
+    _servo = ServoController()
+    _face_tracker: "FaceTracker | None" = FaceTracker(_servo)
+    _head_enabled = True
+except Exception as _head_err:
+    _servo = None
+    _face_tracker = None
+    _head_enabled = False
+    print(f"[HeadTracker] Disabled: {_head_err}", file=sys.stderr)
+
 import requests
 import sounddevice as sd
 try:
@@ -292,10 +306,13 @@ def execute_tool(name: str, args: dict) -> str:
         return "\n\n".join(hits[:6]) if hits else "Ei tietoa tästä aiheesta."
 
     if name == "see":
+        from contextlib import nullcontext
         from vision.scene import capture_and_describe
         question = (args.get("question") or "Kuvaile lyhyesti mitä näet.").strip()
         print(f"[Vision] Capturing for: {question}")
-        return capture_and_describe(question, _get_openai_client())
+        ctx = _face_tracker.camera_exclusive() if _face_tracker else nullcontext()
+        with ctx:
+            return capture_and_describe(question, _get_openai_client())
 
     if name == "save_knowledge":
         fact = (args.get("fact") or "").strip()
@@ -506,6 +523,11 @@ def listen_forever() -> None:
     else:
         print("[Mute] lgpio not available — mute button disabled.", file=sys.stderr)
 
+    # ── Head tracking ──────────────────────────────────────────────────────────
+    if _head_enabled:
+        _face_tracker.start()
+        print("[HeadTracker] Face tracking thread started (pan=GPIO12, tilt=GPIO13)")
+
     print(f"[Mic] device={MIC_DEVICE} channels={MIC_CHANNELS} {native_sr} Hz")
     print(f"[Gemini] Model: {os.environ.get('GEMINI_LIVE_MODEL', 'gemini-live-2.5-flash-native-audio')}")
 
@@ -551,6 +573,8 @@ def listen_forever() -> None:
 
     def on_session_end() -> None:
         print("[Gemini] Session ended → OFFLINE")
+        if _head_enabled:
+            _face_tracker.set_active(False)
         face_set(FaceState.IDLE)
         state["online"] = False
         state["session"] = None
@@ -602,8 +626,18 @@ def listen_forever() -> None:
                 session.send_text(f"[Context] {ctx}")
         threading.Thread(target=_vision_and_inject, daemon=True, name="startup-vision").start()
 
+        # Start face tracking after startup vision has had time to finish
+        if _head_enabled:
+            def _activate_tracking():
+                time.sleep(2.0)
+                if state.get("online"):
+                    _face_tracker.set_active(True)
+            threading.Thread(target=_activate_tracking, daemon=True).start()
+
     def end_session(reason: str = "timeout") -> None:
         print(f"[Engine] → OFFLINE ({reason})")
+        if _head_enabled:
+            _face_tracker.set_active(False)
         face_set(FaceState.IDLE)
         audio_player.stop()
         session = state["session"]
@@ -718,11 +752,17 @@ def listen_forever() -> None:
         except KeyboardInterrupt:
             print("\nStopping.")
             end_session("shutdown")
+            if _head_enabled:
+                _face_tracker.stop()
+                _servo.shutdown()
             audio_player.shutdown()
             stop_display()
             if _gpio_available:
                 lgpio.gpiochip_close(_gpio_handle)
         except Exception:
+            if _head_enabled:
+                _face_tracker.stop()
+                _servo.shutdown()
             audio_player.shutdown()
             stop_display()
             if _gpio_available:
