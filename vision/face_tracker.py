@@ -170,7 +170,13 @@ class FaceTracker:
                 from vision.camera import Camera  # local import avoids circular deps
 
                 with Camera(warmup_seconds=_CAMERA_WARMUP_S) as cam:
-                    logger.debug("[FaceTracker] Camera opened")
+                    if cam.has_ai:
+                        print("[FaceTracker] Camera opened (IMX500 AI — person detection active)")
+                    else:
+                        print(
+                            f"[FaceTracker] Camera opened (backend has no on-device detection — "
+                            "person tracking will not work; requires IMX500 AI Camera)"
+                        )
 
                     while self._active.is_set() and not self._stop.is_set():
 
@@ -197,15 +203,28 @@ class FaceTracker:
     def _track_once(self, cam) -> None:
         """Capture one frame and nudge the servos toward the closest person."""
         try:
-            _, detections = cam.capture_with_detections()
+            # Lower threshold slightly for debug visibility — default 0.5 can miss
+            # close-up faces/heads that are only partially in frame.
+            _, detections = cam.capture_with_detections(min_score=0.4)
         except Exception as exc:
             print(f"[FaceTracker] Capture failed: {exc}")
             return
 
+        if not detections:
+            print("[FaceTracker] No detections at all (score ≥ 0.4)")
+            return
+
+        # Log every detection so we can see what the model actually found
+        for d in detections:
+            print(
+                f"[FaceTracker] Detection: class={d['class']} score={d.get('score', 0):.2f} "
+                f"box={d['box']}"
+            )
+
         # Filter to person class only
         persons = [d for d in detections if d.get("class") == _PERSON_CLASS]
         if not persons:
-            print("[FaceTracker] No person detected")
+            print(f"[FaceTracker] No person (class 0) — got classes: {[d['class'] for d in detections]}")
             return
 
         if len(persons) > 1:
@@ -214,8 +233,13 @@ class FaceTracker:
         # Pick the largest bounding box (largest area ≈ closest person)
         best = max(persons, key=lambda d: _box_area(d["box"]))
         x1, y1, x2, y2 = best["box"]
-        area = int(_box_area(best["box"]))
         score = best.get("score", 0.0)
+
+        # The IMX500 runs inference on the original (pre-rotation) frame.
+        # camera.py rotates the frame 180° in software, so the detection boxes
+        # are in the flipped coordinate space and must be transformed to match.
+        x1, y1, x2, y2 = _FRAME_W - x2, _FRAME_H - y2, _FRAME_W - x1, _FRAME_H - y1
+        area = int(_box_area((x1, y1, x2, y2)))
 
         # Estimate face centre: upper portion of the person bounding box
         face_cx = (x1 + x2) / 2.0

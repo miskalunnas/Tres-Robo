@@ -73,7 +73,6 @@ except Exception:  # pragma: no cover
 from brain.gemini_live import GeminiLiveSession, GEMINI_SAMPLE_RATE_IN, GEMINI_SAMPLE_RATE_OUT
 from brain.llm import LLM_TOOLS, SYSTEM_PROMPT  # reuse existing tools + system prompt
 from voice.audio_out import AudioPlayer
-from voice.doa import DOAEstimator
 from memory.store import MemoryStore
 from voice import stt_openai
 
@@ -538,7 +537,6 @@ def listen_forever() -> None:
         )
     vad = webrtcvad.Vad(VAD_AGGRESSIVENESS)
     audio_player = AudioPlayer(sample_rate=GEMINI_SAMPLE_RATE_OUT)
-    doa = DOAEstimator(sample_rate=native_sr)
 
     # Mutable state (using a dict so closures can modify)
     state = {
@@ -686,10 +684,6 @@ def listen_forever() -> None:
 
                 if muted.is_set():
                     continue  # drop all audio while muted
-
-                # DOA — feed raw stereo frame, skip while bot is speaking
-                if not audio_player.recently_played(cooldown=0.5):
-                    doa.push(chunk)
 
                 if state["online"]:
                     # ── ONLINE: stream raw audio to Gemini ───────────────────
