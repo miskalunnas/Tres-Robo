@@ -137,14 +137,29 @@ class ServoController:
         self.set_pan(PAN_CENTER_DEG)
         self.set_tilt(TILT_CENTER_DEG)
 
+    def release(self) -> None:
+        """Stop PWM on both servos so they hold position silently.
+
+        The servo physically stays where it is (gear train holds it) but
+        the control loop stops running, eliminating the jitter buzz.
+        Call move methods to re-energise before the next movement.
+        """
+        if not self._available:
+            return
+        try:
+            _lgpio.tx_servo(self._handle, self._pan_gpio,  0, _SERVO_FREQ_HZ)
+            _lgpio.tx_servo(self._handle, self._tilt_gpio, 0, _SERVO_FREQ_HZ)
+            logger.debug("[Servo] PWM released — servos silent")
+        except Exception as exc:
+            logger.error("[Servo] Release error: %s", exc)
+
     def shutdown(self) -> None:
         """Centre servos, wait for movement, stop PWM, release GPIO chip."""
         self.center()
         time.sleep(0.5)   # give servos time to reach centre
+        self.release()
         if self._available and self._handle is not None:
             try:
-                _lgpio.tx_servo(self._handle, self._pan_gpio,  0, _SERVO_FREQ_HZ)
-                _lgpio.tx_servo(self._handle, self._tilt_gpio, 0, _SERVO_FREQ_HZ)
                 _lgpio.gpiochip_close(self._handle)
                 logger.info("[Servo] Shutdown complete")
             except Exception as exc:
