@@ -578,7 +578,7 @@ def listen_forever() -> None:
         state["session"] = None
         state["session_closed_at"] = time.monotonic()
 
-    def start_session() -> None:
+    def start_session(first_message: str | None = None) -> None:
         nonlocal segment_duration, silence_duration
         # Enforce cooldown to avoid 409 Conflict (server-side session still closing)
         since_close = time.monotonic() - state["session_closed_at"]
@@ -614,6 +614,12 @@ def listen_forever() -> None:
         state["last_audio_in"] = time.monotonic()
         state["end_requested"] = False
         face_set(FaceState.THINKING)
+
+        # If the wake utterance contained more than just the wake word, send it
+        # immediately so Gemini can respond without waiting for a second input.
+        if first_message:
+            print(f"[Engine] First message from wake utterance: {repr(first_message)}")
+            session.send_text(first_message)
 
         # Run vision in background — inject context once camera finishes
         # so the session opens immediately without waiting for the camera.
@@ -654,7 +660,8 @@ def listen_forever() -> None:
         if not wake_word:
             wake_word = _lenient_wake_match(text)
         if wake_word:
-            start_session()
+            remainder = _strip_wake_word(text, wake_word).strip()
+            start_session(first_message=remainder or None)
         elif WAKE_DEBUG:
             print(f"[Wake debug] No wake word in: {repr(text)}", file=sys.stderr)
 
