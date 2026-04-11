@@ -522,6 +522,11 @@ def listen_forever() -> None:
     else:
         print("[Mute] lgpio not available — mute button disabled.", file=sys.stderr)
 
+    # ── Camera stream (optional) ───────────────────────────────────────────────
+    if os.environ.get("CAMERA_STREAM", "").strip() == "1":
+        from vision.mjpeg_server import start as _start_stream
+        _start_stream()
+
     # ── Head tracking ──────────────────────────────────────────────────────────
     if _head_enabled:
         _face_tracker.start()
