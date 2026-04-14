@@ -25,7 +25,7 @@ load_dotenv()
 
 
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY", "")
-GEMINI_LIVE_MODEL = os.environ.get("GEMINI_LIVE_MODEL", "gemini-3.1-flash-live-preview")
+GEMINI_LIVE_MODEL = os.environ.get("GEMINI_LIVE_MODEL", "gemini-2.5-flash-native-audio-preview-12-2025")
 GEMINI_VOICE = os.environ.get("GEMINI_VOICE", "Charon")
 GEMINI_TEMPERATURE = float(os.environ.get("GEMINI_TEMPERATURE", "1.4"))
 
@@ -183,25 +183,22 @@ class GeminiLiveSession:
         gemini_tools = _convert_tools_to_gemini(self._tools)
         use_tools = os.environ.get("GEMINI_TOOLS", "1").strip().lower() not in ("0", "false", "no")
 
-        # ThinkingConfig: only used for 2.5 models (reduces latency ~10s → ~1s).
-        # 3.1 Live is already low-latency by design and rejects thinking_config.
-        thinking_cfg = None
-        if "3.1" not in GEMINI_LIVE_MODEL:
-            try:
-                thinking_cfg = types.ThinkingConfig(thinking_budget=0)
-            except Exception:
-                pass
+        # Disable thinking (chain-of-thought) — reduces latency from ~10s to ~1s.
+        # ThinkingConfig may not be available on all SDK versions; ignore if so.
+        try:
+            thinking_cfg = types.ThinkingConfig(thinking_budget=0)
+        except Exception:
+            thinking_cfg = None
 
-        # Audio transcription: supported on 2.5, not yet confirmed for 3.1 Live.
+        # Enable audio transcription if the SDK supports it (added in newer versions)
         transcription_kwargs: dict = {}
-        if "3.1" not in GEMINI_LIVE_MODEL:
-            try:
-                transcription_kwargs = {
-                    "input_audio_transcription":  types.AudioTranscriptionConfig(),
-                    "output_audio_transcription": types.AudioTranscriptionConfig(),
-                }
-            except AttributeError:
-                pass  # older SDK version — transcripts unavailable
+        try:
+            transcription_kwargs = {
+                "input_audio_transcription":  types.AudioTranscriptionConfig(),
+                "output_audio_transcription": types.AudioTranscriptionConfig(),
+            }
+        except AttributeError:
+            pass  # older SDK version — transcripts unavailable
 
         config = types.LiveConnectConfig(
             response_modalities=["AUDIO"],
