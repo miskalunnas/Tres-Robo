@@ -191,7 +191,9 @@ class FaceTracker:
                 self._servo.center()
                 time.sleep(0.6)      # let servos physically reach centre
                 self._servo.release()  # cut PWM — stops jitter buzz
-                self._active.wait()  # block indefinitely until conversation starts
+                # Poll so the thread can exit cleanly when stop() is called.
+                while not self._active.is_set() and not self._stop.is_set():
+                    time.sleep(0.1)
                 continue
 
             # --- Active mode: open camera and track ---------------------------
