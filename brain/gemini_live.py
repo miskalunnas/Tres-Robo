@@ -183,16 +183,14 @@ class GeminiLiveSession:
         gemini_tools = _convert_tools_to_gemini(self._tools)
         use_tools = os.environ.get("GEMINI_TOOLS", "1").strip().lower() not in ("0", "false", "no")
 
-        # Disable thinking (chain-of-thought) — reduces latency from ~10s to ~1s.
-        # ThinkingConfig may not be available on all SDK versions; ignore if so.
-        try:
-            # 3.1+ uses thinking_level (string); 2.5 used thinking_budget (int)
-            thinking_cfg = types.ThinkingConfig(thinking_level="low")
-        except Exception:
+        # ThinkingConfig: only used for 2.5 models (reduces latency ~10s → ~1s).
+        # 3.1 Live is already low-latency by design and rejects thinking_config.
+        thinking_cfg = None
+        if "3.1" not in GEMINI_LIVE_MODEL:
             try:
                 thinking_cfg = types.ThinkingConfig(thinking_budget=0)
             except Exception:
-                thinking_cfg = None
+                pass
 
         # Enable audio transcription if the SDK supports it (added in newer versions)
         transcription_kwargs: dict = {}
