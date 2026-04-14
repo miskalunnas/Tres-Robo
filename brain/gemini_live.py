@@ -192,15 +192,16 @@ class GeminiLiveSession:
             except Exception:
                 pass
 
-        # Enable audio transcription if the SDK supports it (added in newer versions)
+        # Audio transcription: supported on 2.5, not yet confirmed for 3.1 Live.
         transcription_kwargs: dict = {}
-        try:
-            transcription_kwargs = {
-                "input_audio_transcription":  types.AudioTranscriptionConfig(),
-                "output_audio_transcription": types.AudioTranscriptionConfig(),
-            }
-        except AttributeError:
-            pass  # older SDK version — transcripts unavailable
+        if "3.1" not in GEMINI_LIVE_MODEL:
+            try:
+                transcription_kwargs = {
+                    "input_audio_transcription":  types.AudioTranscriptionConfig(),
+                    "output_audio_transcription": types.AudioTranscriptionConfig(),
+                }
+            except AttributeError:
+                pass  # older SDK version — transcripts unavailable
 
         config = types.LiveConnectConfig(
             response_modalities=["AUDIO"],
