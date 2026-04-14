@@ -23,6 +23,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY", "")
 GEMINI_LIVE_MODEL = os.environ.get("GEMINI_LIVE_MODEL", "gemini-3.1-flash-live-preview")
 GEMINI_VOICE = os.environ.get("GEMINI_VOICE", "Charon")
@@ -125,9 +126,9 @@ class GeminiLiveSession:
         if session is None:
             return
         try:
-            await session.send(
-                input={"data": jpeg_bytes, "mime_type": "image/jpeg"},
-                end_of_turn=False,
+            from google.genai import types as _t
+            await session.send_realtime_input(
+                video=_t.Blob(data=jpeg_bytes, mime_type="image/jpeg")
             )
         except Exception as exc:
             if not self._closed:
@@ -266,9 +267,12 @@ class GeminiLiveSession:
             now = asyncio.get_event_loop().time()
             if buffer and (now - last_send) >= BATCH_INTERVAL:
                 try:
-                    await session.send(
-                        input={"data": bytes(buffer), "mime_type": f"audio/pcm;rate={GEMINI_SAMPLE_RATE_IN}"},
-                        end_of_turn=False,
+                    from google.genai import types as _t
+                    await session.send_realtime_input(
+                        audio=_t.Blob(
+                            data=bytes(buffer),
+                            mime_type=f"audio/pcm;rate={GEMINI_SAMPLE_RATE_IN}",
+                        )
                     )
                 except Exception as exc:
                     if not self._closed:
