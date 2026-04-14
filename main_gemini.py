@@ -295,6 +295,14 @@ def execute_tool(name: str, args: dict) -> str:
         from Tools.music import volume_down
         return f"Ääni {volume_down()}%."
 
+    if name == "get_events":
+        from Tools.events import get_upcoming_events
+        return get_upcoming_events()
+
+    if name == "get_event_details":
+        from Tools.events import get_event_details
+        return get_event_details(args.get("event_id") or "")
+
     if name == "get_menu":
         from Tools.menu import get_all_menus, get_menu
         restaurant = (args.get("restaurant") or "").strip().lower()

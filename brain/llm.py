@@ -113,6 +113,41 @@ LLM_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "get_events",
+            "description": (
+                "Fetch upcoming TRES events from the Luma calendar. "
+                "Call when the user asks about events, what's happening, upcoming activities, "
+                "'mitä tapahtumia on', 'mitä on tulossa', 'onko tapahtumia', 'what events are coming up'. "
+                "Returns a compact list with event names, dates, locations, and IDs. "
+                "Use the returned [id:evt-xxx] values when calling get_event_details."
+            ),
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_event_details",
+            "description": (
+                "Fetch full details for a specific TRES event: description, exact location, and link. "
+                "Call ONLY after get_events has been called and the user asks for more info about a specific event. "
+                "Pass the event_id exactly as it appeared in the get_events response ([id:evt-xxx])."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "event_id": {
+                        "type": "string",
+                        "description": "The event API ID from the get_events response, format: evt-xxx.",
+                    }
+                },
+                "required": ["event_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "get_menu",
             "description": "Hae tämän päivän ruokalistat Hervannan kampukselta. Käytä kun käyttäjä kysyy ruokaa/lounasta. Vastaus on tiivis: päivä + yksi rivi per paikka (vain ruokalajit). Vastaa 1–2 lauseella, älä lue koko listaa ääneen. Ravintolat: reaktori, newton, konehuone, hertsi.",
             "parameters": {
