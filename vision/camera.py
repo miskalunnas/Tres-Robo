@@ -13,12 +13,17 @@ Install on Pi:
 """
 import os
 import sys
+import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
 from types import TracebackType
 
 import numpy as np
+
+# Global lock — picamera2 only allows one open instance at a time.
+# All Camera context-manager users automatically serialise through this.
+_camera_lock = threading.Lock()
 
 # ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -126,7 +131,12 @@ class Camera:
         self._imx500 = None    # IMX500 instance (AI Camera only)
 
     def __enter__(self) -> "Camera":
-        self._open()
+        _camera_lock.acquire()
+        try:
+            self._open()
+        except Exception:
+            _camera_lock.release()
+            raise
         return self
 
     def __exit__(
@@ -135,7 +145,10 @@ class Camera:
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:
-        self._close()
+        try:
+            self._close()
+        finally:
+            _camera_lock.release()
 
     # ── public API ─────────────────────────────────────────────────────────────
 
