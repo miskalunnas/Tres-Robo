@@ -24,7 +24,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY", "")
-GEMINI_LIVE_MODEL = os.environ.get("GEMINI_LIVE_MODEL", "gemini-2.5-flash-native-audio-preview-12-2025")
+GEMINI_LIVE_MODEL = os.environ.get("GEMINI_LIVE_MODEL", "gemini-3.1-flash-live-preview")
 GEMINI_VOICE = os.environ.get("GEMINI_VOICE", "Charon")
 GEMINI_TEMPERATURE = float(os.environ.get("GEMINI_TEMPERATURE", "1.4"))
 
@@ -68,6 +68,7 @@ class GeminiLiveSession:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._audio_queue: asyncio.Queue | None = None
         self._text_queue: asyncio.Queue | None = None
+        self._live_session = None
         self._closed = False
         self._ready = threading.Event()
         self._send_count = 0
@@ -106,6 +107,31 @@ class GeminiLiveSession:
         """Thread-safe: send a text message to Gemini (end_of_turn=True)."""
         if self._loop and self._text_queue and not self._closed:
             self._loop.call_soon_threadsafe(self._text_queue.put_nowait, text)
+
+    def send_image(self, jpeg_bytes: bytes) -> None:
+        """Thread-safe: inject a JPEG frame into the live session as realtime input."""
+        if self._loop and self._audio_queue and not self._closed:
+            self._loop.call_soon_threadsafe(self._enqueue_image, jpeg_bytes)
+
+    def _enqueue_image(self, jpeg_bytes: bytes) -> None:
+        """Called from the asyncio thread; schedules an image send coroutine."""
+        if self._loop and not self._closed:
+            asyncio.ensure_future(self._send_image_async(jpeg_bytes), loop=self._loop)
+
+    async def _send_image_async(self, jpeg_bytes: bytes) -> None:
+        """Send a JPEG frame as a realtime input blob to the live session."""
+        # _session is set once the WebSocket handshake completes
+        session = getattr(self, "_live_session", None)
+        if session is None:
+            return
+        try:
+            await session.send(
+                input={"data": jpeg_bytes, "mime_type": "image/jpeg"},
+                end_of_turn=False,
+            )
+        except Exception as exc:
+            if not self._closed:
+                print(f"[Gemini] Image send error: {exc}")
 
     def close(self) -> None:
         """Thread-safe: close the session."""
@@ -159,9 +185,13 @@ class GeminiLiveSession:
         # Disable thinking (chain-of-thought) — reduces latency from ~10s to ~1s.
         # ThinkingConfig may not be available on all SDK versions; ignore if so.
         try:
-            thinking_cfg = types.ThinkingConfig(thinking_budget=0)
+            # 3.1+ uses thinking_level (string); 2.5 used thinking_budget (int)
+            thinking_cfg = types.ThinkingConfig(thinking_level="low")
         except Exception:
-            thinking_cfg = None
+            try:
+                thinking_cfg = types.ThinkingConfig(thinking_budget=0)
+            except Exception:
+                thinking_cfg = None
 
         # Enable audio transcription if the SDK supports it (added in newer versions)
         transcription_kwargs: dict = {}
@@ -195,6 +225,7 @@ class GeminiLiveSession:
         print(f"[Gemini] Opening session (model={GEMINI_LIVE_MODEL}, voice={GEMINI_VOICE})")
         try:
             async with client.aio.live.connect(model=GEMINI_LIVE_MODEL, config=config) as session:
+                self._live_session = session
                 print("[Gemini] Session open — streaming audio.")
                 self._ready.set()
                 await asyncio.gather(
@@ -202,6 +233,7 @@ class GeminiLiveSession:
                     self._receive_loop(session),
                     self._text_loop(session),
                 )
+                self._live_session = None
         except Exception as exc:
             if not self._closed:
                 msg = str(exc)

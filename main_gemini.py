@@ -70,7 +70,7 @@ try:
 except Exception:  # pragma: no cover
     webrtcvad = None
 
-from brain.gemini_live import GeminiLiveSession, GEMINI_SAMPLE_RATE_IN, GEMINI_SAMPLE_RATE_OUT
+from brain.gemini_live import GeminiLiveSession, GEMINI_LIVE_MODEL, GEMINI_SAMPLE_RATE_IN, GEMINI_SAMPLE_RATE_OUT
 from brain.llm import LLM_TOOLS, SYSTEM_PROMPT  # reuse existing tools + system prompt
 from voice.audio_out import AudioPlayer
 from memory.store import MemoryStore
@@ -180,6 +180,7 @@ def float32_to_pcm16(chunk: np.ndarray) -> bytes:
 
 _store = MemoryStore()
 _openai_client = None  # lazy-init for vision
+_current_session: "GeminiLiveSession | None" = None  # set when a session is active
 
 _PENDING_ACTION: dict | None = None
 
@@ -306,12 +307,25 @@ def execute_tool(name: str, args: dict) -> str:
 
     if name == "see":
         from contextlib import nullcontext
-        from vision.scene import capture_and_describe
         question = (args.get("question") or "Kuvaile lyhyesti mitä näet.").strip()
         print(f"[Vision] Capturing for: {question}")
         ctx = _face_tracker.camera_exclusive() if _face_tracker else nullcontext()
-        with ctx:
-            return capture_and_describe(question, _get_openai_client())
+        # Use Gemini-native vision when on 3.1+ (inline image into live session);
+        # fall back to GPT-4o-mini for older models or if no session is open.
+        _session = _current_session
+        if _session is not None and "3.1" in GEMINI_LIVE_MODEL:
+            import cv2
+            from vision.camera import Camera
+            with ctx:
+                with Camera(warmup_seconds=0.3) as cam:
+                    frame = cam.capture()
+            _, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+            _session.send_image(jpeg.tobytes())
+            return question  # Gemini sees the image and answers the question
+        else:
+            from vision.scene import capture_and_describe
+            with ctx:
+                return capture_and_describe(question, _get_openai_client())
 
     if name == "save_knowledge":
         fact = (args.get("fact") or "").strip()
@@ -575,12 +589,14 @@ def listen_forever() -> None:
         return result
 
     def on_session_end() -> None:
+        global _current_session
         print("[Gemini] Session ended → OFFLINE")
         if _head_enabled:
             _face_tracker.set_active(False)
         face_set(FaceState.IDLE)
         state["online"] = False
         state["session"] = None
+        _current_session = None
         state["session_closed_at"] = time.monotonic()
 
     def start_session(first_message: str | None = None) -> None:
@@ -614,6 +630,8 @@ def listen_forever() -> None:
             session.close()
             return
         state["session"] = session
+        global _current_session
+        _current_session = session
         state["online"] = True
         state["last_audio_out"] = time.monotonic()
         state["last_audio_in"] = time.monotonic()
@@ -644,6 +662,7 @@ def listen_forever() -> None:
             threading.Thread(target=_activate_tracking, daemon=True).start()
 
     def end_session(reason: str = "timeout") -> None:
+        global _current_session
         print(f"[Engine] → OFFLINE ({reason})")
         if _head_enabled:
             _face_tracker.set_active(False)
@@ -653,6 +672,7 @@ def listen_forever() -> None:
         if session:
             session.close()
         state["session"] = None
+        _current_session = None
         state["online"] = False
         state["end_requested"] = False
 
