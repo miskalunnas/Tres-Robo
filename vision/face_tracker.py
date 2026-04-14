@@ -247,7 +247,6 @@ class FaceTracker:
             detections = _haar_detect_faces(frame, haar)
 
         if not detections:
-            print("[FaceTracker] No face detected")
             return
 
         # Filter / label

@@ -201,6 +201,9 @@ class MusicPlayer:
                 if attempt > 0:
                     print(f"[Music] Resolved with fallback: {search_query!r}", file=sys.stderr)
                 return result.stdout.strip()
+            err = (result.stderr or "").strip()
+            if err:
+                print(f"[Music] yt-dlp error ({search_query!r}): {err[:300]}", file=sys.stderr)
         print(f"[Music] No result for: {query!r}", file=sys.stderr)
         return None
 

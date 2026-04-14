@@ -41,10 +41,19 @@ except Exception as _face_err:
 _MUTE_GPIO_PIN = int(os.environ.get("MUTE_GPIO_PIN", "17"))
 _GPIO_DEBOUNCE_S = 0.25  # seconds
 
+# ── Push-to-talk (PTT) — temporary expo feature ────────────────────────────────
+# Set PTT_MODE=1 in .env to require holding GPIO 27 while speaking.
+# When PTT_MODE is off (default), audio streams continuously as before.
+_PTT_GPIO_PIN = int(os.environ.get("PTT_GPIO_PIN", "27"))
+PTT_MODE = os.environ.get("PTT_MODE", "0").strip().lower() in ("1", "true", "yes")
+_ptt_held = threading.Event()  # set = button held down, clear = released
+
 try:
     import lgpio  # type: ignore[import]
     _gpio_handle = lgpio.gpiochip_open(0)
     lgpio.gpio_claim_input(_gpio_handle, _MUTE_GPIO_PIN, lgpio.SET_PULL_UP)
+    if PTT_MODE:
+        lgpio.gpio_claim_input(_gpio_handle, _PTT_GPIO_PIN, lgpio.SET_PULL_UP)
     _gpio_available = True
 except Exception as _gpio_err:
     _gpio_available = False
@@ -522,6 +531,7 @@ def listen_forever() -> None:
 
         def _gpio_poll():
             prev = 1  # pulled high = unpressed
+            ptt_prev = 1
             while True:
                 try:
                     val = lgpio.gpio_read(_gpio_handle, _MUTE_GPIO_PIN)
@@ -537,10 +547,27 @@ def listen_forever() -> None:
                     else:
                         print(f"[Mute] Debounced (too fast)")
                 prev = val
+
+                if PTT_MODE:
+                    try:
+                        ptt_val = lgpio.gpio_read(_gpio_handle, _PTT_GPIO_PIN)
+                    except Exception as exc:
+                        print(f"[PTT] GPIO read error: {exc}", file=sys.stderr)
+                        break
+                    if ptt_val == 0:   # button held
+                        _ptt_held.set()
+                    else:
+                        _ptt_held.clear()
+                    if ptt_val != ptt_prev:
+                        print("[PTT] Held" if ptt_val == 0 else "[PTT] Released")
+                    ptt_prev = ptt_val
+
                 time.sleep(0.02)  # 20 ms poll interval
 
         threading.Thread(target=_gpio_poll, daemon=True, name="gpio-poll").start()
         print(f"[Mute] Button ready on GPIO {_MUTE_GPIO_PIN}.")
+        if PTT_MODE:
+            print(f"[PTT] Push-to-talk enabled on GPIO {_PTT_GPIO_PIN} — hold to speak.")
     else:
         print("[Mute] lgpio not available — mute button disabled.", file=sys.stderr)
 
@@ -733,12 +760,14 @@ def listen_forever() -> None:
                         face_set(FaceState.LISTENING)
                     # Suppress mic while bot is speaking (queue busy) OR just
                     # finished (cooldown covers paplay's internal buffer drain).
+                    # In PTT mode, also require the push-to-talk button to be held.
                     if session and not audio_player.recently_played(cooldown=0.5):
-                        pcm16 = float32_to_pcm16(
-                            resample(mono, native_sr, GEMINI_SAMPLE_RATE_IN)
-                        )
-                        session.send_audio(pcm16)
-                        state["last_audio_in"] = now  # reset while user is speaking
+                        if not PTT_MODE or _ptt_held.is_set():
+                            pcm16 = float32_to_pcm16(
+                                resample(mono, native_sr, GEMINI_SAMPLE_RATE_IN)
+                            )
+                            session.send_audio(pcm16)
+                            state["last_audio_in"] = now  # reset while user is speaking
 
                     # Inactivity: time out if neither side has produced audio recently
                     last_activity = max(state["last_audio_out"], state["last_audio_in"])
