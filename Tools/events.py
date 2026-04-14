@@ -5,6 +5,7 @@ in-process. Results are cached for CACHE_TTL_SECONDS to avoid hammering
 the API on repeated questions within a session.
 
 Environment variables:
+    LUMA_API_KEY       — Luma API key (required, from lu.ma → Settings → API)
     LUMA_CALENDAR_ID   — override auto-discovery (format: cal-xxxxxxxxx)
     LUMA_CALENDAR_SLUG — Luma URL slug (default: tres)
 """
@@ -22,6 +23,15 @@ _LUMA_API = "https://api.lu.ma/public/v1"
 _LUMA_PAGE = f"https://lu.ma/{_SLUG}"
 CACHE_TTL_SECONDS = 900  # 15 minutes
 
+
+def _api_headers() -> dict:
+    """Build request headers, including the API key if set."""
+    headers = {"accept": "application/json"}
+    key = os.environ.get("LUMA_API_KEY", "").strip()
+    if key:
+        headers["x-luma-api-key"] = key
+    return headers
+
 try:
     from zoneinfo import ZoneInfo
     _TZ = ZoneInfo("Europe/Helsinki")
@@ -37,7 +47,7 @@ _cache_expires: float = 0.0
 def _discover_calendar_id() -> str | None:
     """Extract cal-xxx from the lu.ma calendar page HTML."""
     try:
-        r = requests.get(_LUMA_PAGE, timeout=8, headers={"User-Agent": "Tres-Robo/1.0"})
+        r = requests.get(_LUMA_PAGE, timeout=8, headers={"User-Agent": "Tres-Robo/1.0", **_api_headers()})
         r.raise_for_status()
         match = re.search(r'"(cal-[A-Za-z0-9]+)"', r.text)
         if match:
@@ -115,7 +125,7 @@ def get_upcoming_events(limit: int = 6) -> str:
             f"{_LUMA_API}/calendar/list-events",
             params={"calendar_api_id": _calendar_id},
             timeout=8,
-            headers={"accept": "application/json"},
+            headers=_api_headers(),
         )
         r.raise_for_status()
         data = r.json()
@@ -162,7 +172,7 @@ def get_event_details(event_id: str) -> str:
             f"{_LUMA_API}/event/get",
             params={"api_id": event_id},
             timeout=8,
-            headers={"accept": "application/json"},
+            headers=_api_headers(),
         )
         r.raise_for_status()
         data = r.json()
