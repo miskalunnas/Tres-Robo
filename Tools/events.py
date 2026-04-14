@@ -113,7 +113,7 @@ def get_upcoming_events(limit: int = 6) -> str:
     try:
         r = requests.get(
             f"{_LUMA_API}/calendar/list-events",
-            params={"calendar_api_id": _calendar_id, "pagination_limit": 20},
+            params={"calendar_api_id": _calendar_id},
             timeout=8,
             headers={"accept": "application/json"},
         )
