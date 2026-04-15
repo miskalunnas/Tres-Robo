@@ -59,6 +59,7 @@ class GeminiLiveSession:
         audio_out_handler: Callable[[bytes], None],
         on_session_end: Callable[[], None] | None = None,
         greeting: str = "Hei! Kuuntelen.",
+        disable_vad: bool = False,
     ) -> None:
         self._system_prompt = system_prompt
         self._tools = tools
@@ -66,6 +67,7 @@ class GeminiLiveSession:
         self._audio_out_handler = audio_out_handler
         self._on_session_end = on_session_end
         self._greeting = greeting
+        self._disable_vad = disable_vad
         self._loop: asyncio.AbstractEventLoop | None = None
         self._audio_queue: asyncio.Queue | None = None
         self._text_queue: asyncio.Queue | None = None
@@ -108,6 +110,26 @@ class GeminiLiveSession:
         """Thread-safe: send a text message to Gemini (end_of_turn=True)."""
         if self._loop and self._text_queue and not self._closed:
             self._loop.call_soon_threadsafe(self._text_queue.put_nowait, text)
+
+    def send_activity_start(self) -> None:
+        """Thread-safe: signal to Gemini that the user started speaking (PTT button pressed)."""
+        if self._loop and not self._closed:
+            self._loop.call_soon_threadsafe(self._schedule_activity_start)
+
+    def _schedule_activity_start(self) -> None:
+        if self._loop and not self._closed:
+            asyncio.ensure_future(self._send_activity_start_async(), loop=self._loop)
+
+    async def _send_activity_start_async(self) -> None:
+        session = self._live_session
+        if session is None:
+            return
+        try:
+            from google.genai import types as _t
+            await session.send_realtime_input(activity_start=_t.ActivityStart())
+        except Exception as exc:
+            if not self._closed:
+                print(f"[Gemini] Activity start error: {exc}")
 
     def send_activity_end(self) -> None:
         """Thread-safe: signal to Gemini that the user stopped speaking (PTT button released).
@@ -222,6 +244,21 @@ class GeminiLiveSession:
         except AttributeError:
             pass  # older SDK version — transcripts unavailable
 
+        # PTT mode: disable server-side VAD so explicit activity_start/end signals work.
+        vad_kwargs: dict = {}
+        if self._disable_vad:
+            try:
+                vad_kwargs = {
+                    "realtime_input_config": types.RealtimeInputConfig(
+                        automatic_activity_detection=types.AutomaticActivityDetection(
+                            disabled=True
+                        )
+                    )
+                }
+                print("[Gemini] Server VAD disabled (PTT mode)")
+            except Exception:
+                pass  # older SDK — activity control may still work without this
+
         config = types.LiveConnectConfig(
             response_modalities=["AUDIO"],
             system_instruction=types.Content(
@@ -238,7 +275,9 @@ class GeminiLiveSession:
             generation_config=types.GenerationConfig(temperature=GEMINI_TEMPERATURE),
             **({} if thinking_cfg is None else {"thinking_config": thinking_cfg}),
             **transcription_kwargs,
+            **vad_kwargs,
         )
+
         print(f"[Gemini] Temperature: {GEMINI_TEMPERATURE}")
 
         print(f"[Gemini] Opening session (model={GEMINI_LIVE_MODEL}, voice={GEMINI_VOICE})")

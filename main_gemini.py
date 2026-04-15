@@ -567,6 +567,9 @@ def listen_forever() -> None:
                     if ptt_val != ptt_prev:
                         if ptt_val == 0:
                             print("[PTT] Held")
+                            sess = _current_session
+                            if sess is not None:
+                                sess.send_activity_start()
                         else:
                             print("[PTT] Released — signalling end of turn")
                             sess = _current_session
@@ -665,6 +668,7 @@ def listen_forever() -> None:
             tool_handler=on_tool_call,
             audio_out_handler=on_audio_out,
             on_session_end=on_session_end,
+            disable_vad=PTT_MODE,
         )
         session.start()
         if not session.wait_ready(timeout=10.0):
