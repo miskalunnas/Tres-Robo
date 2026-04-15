@@ -65,12 +65,98 @@ except Exception as _gpio_err:
     _gpio_available = False
     _gpio_handle = None
 
+# ── Scene-awareness (IMX500 ambient object detection) ──────────────────────────
+
+# Subset of COCO 80 classes relevant to an office/social environment
+_COCO_NAMES: dict[int, str] = {
+    1: "bicycle", 2: "car", 3: "motorcycle", 13: "bench",
+    14: "bird", 15: "cat", 16: "dog",
+    24: "backpack", 25: "umbrella", 26: "handbag", 27: "tie", 28: "suitcase",
+    39: "bottle", 41: "cup", 42: "fork", 43: "knife", 44: "spoon", 45: "bowl",
+    46: "banana", 47: "apple", 48: "sandwich", 49: "orange", 51: "carrot",
+    56: "chair", 57: "couch", 58: "potted plant", 60: "dining table",
+    62: "tv", 63: "laptop", 64: "mouse", 65: "remote", 66: "keyboard",
+    67: "cell phone", 68: "microwave", 69: "oven", 72: "refrigerator",
+    73: "book", 74: "clock", 75: "vase", 76: "scissors", 77: "teddy bear",
+}
+
+_scene_last_labels: frozenset = frozenset()
+_scene_last_inject: float = 0.0
+_last_bot_audio_time: float = 0.0
+_SCENE_MIN_SCORE      = 0.5
+_SCENE_INJECT_INTERVAL = 10.0   # minimum seconds between injections
+_SCENE_REFRESH_INTERVAL = 40.0  # force re-inject even if scene unchanged
+
+
+def _scene_detect_callback(_frame, detections: list) -> None:
+    """Called by FaceTracker each tracking step. Injects brief scene context
+    into the active Gemini session when the visible objects change."""
+    global _scene_last_labels, _scene_last_inject
+
+    sess = _current_session
+    if sess is None:
+        return
+
+    now = time.monotonic()
+
+    # Don't interrupt while the bot is speaking or within 2s after it stops
+    if now - _last_bot_audio_time < 2.0:
+        return
+
+    # Don't inject while user is holding PTT (about to speak)
+    if PTT_MODE and _ptt_held.is_set():
+        return
+
+    persons = [d for d in detections if d["class"] == 0 and d["score"] >= _SCENE_MIN_SCORE]
+    objects = [d for d in detections if d["class"] != 0
+               and d["score"] >= _SCENE_MIN_SCORE
+               and d["class"] in _COCO_NAMES]
+
+    if not objects:
+        if _scene_last_labels:
+            _scene_last_labels = frozenset()
+        return
+
+    current_labels = frozenset(_COCO_NAMES[d["class"]] for d in objects)
+    changed = current_labels != _scene_last_labels
+    stale   = (now - _scene_last_inject) >= _SCENE_REFRESH_INTERVAL
+
+    if not changed and not stale:
+        return
+    if (now - _scene_last_inject) < _SCENE_INJECT_INTERVAL:
+        return
+
+    # Determine which objects are near/held by a person (centre inside person box)
+    near_person: set[str] = set()
+    for obj in objects:
+        ox1, oy1, ox2, oy2 = obj["box"]
+        cx, cy = (ox1 + ox2) / 2, (oy1 + oy2) / 2
+        for p in persons:
+            px1, py1, px2, py2 = p["box"]
+            if px1 <= cx <= px2 and py1 <= cy <= py2:
+                near_person.add(_COCO_NAMES[obj["class"]])
+                break
+
+    background = sorted(current_labels - near_person)
+    parts: list[str] = []
+    if background:
+        parts.append(f"visible: {', '.join(background)}")
+    if near_person:
+        parts.append(f"near/held by person: {', '.join(sorted(near_person))}")
+
+    msg = "[Scene: " + "; ".join(parts) + "]"
+    _scene_last_labels = current_labels
+    _scene_last_inject = now
+    sess.send_text(msg)
+    print(f"[Scene] {msg}")
+
+
 # ── Pan/tilt head tracking ─────────────────────────────────────────────────────
 try:
     from hardware.servo import ServoController
     from vision.face_tracker import FaceTracker
     _servo = ServoController()
-    _face_tracker: "FaceTracker | None" = FaceTracker(_servo)
+    _face_tracker: "FaceTracker | None" = FaceTracker(_servo, on_detections=_scene_detect_callback)
     _head_enabled = True
 except Exception as _head_err:
     _servo = None
@@ -131,7 +217,7 @@ MAX_SILENCE_WHEN_OFFLINE = 0.8
 MAX_SEGMENT_OFFLINE = 8.0
 
 # Session inactivity: close if Gemini hasn't produced audio for this long
-INACTIVITY_TIMEOUT_SECONDS = 20.0
+INACTIVITY_TIMEOUT_SECONDS = 40.0
 
 try:
     MIC_GAIN = float(os.environ.get("MIC_GAIN", "1.5").strip())
@@ -623,7 +709,10 @@ def listen_forever() -> None:
     # ── callbacks ──────────────────────────────────────────────────────────────
 
     def on_audio_out(pcm_bytes: bytes) -> None:
-        state["last_audio_out"] = time.monotonic()
+        global _last_bot_audio_time
+        now = time.monotonic()
+        state["last_audio_out"] = now
+        _last_bot_audio_time = now
         face_set(FaceState.SPEAKING)
         audio_player.play(pcm_bytes)
 
@@ -658,6 +747,11 @@ def listen_forever() -> None:
         segment_duration = 0.0
         silence_duration = 0.0
 
+        # Reset scene state so the first detection of this session injects fresh context
+        global _scene_last_labels, _scene_last_inject
+        _scene_last_labels = frozenset()
+        _scene_last_inject = 0.0
+
         # Language override — native audio models need this prominent.
         lang_prefix = "CRITICAL: Always reply in the same language the user just spoke. English input → English reply. Finnish input → Finnish reply. Never switch language mid-response.\n\n"
 
@@ -672,7 +766,13 @@ def listen_forever() -> None:
         _now = datetime.now(_tz)
         time_prefix = f"Tämänhetkinen aika: {_now.strftime('%A %d.%m.%Y klo %H:%M')} (Helsinki). Käytä tätä vastauksissa kun käyttäjä kysyy aikaa tai päivämäärää.\n\n"
 
-        full_prompt = lang_prefix + time_prefix + SYSTEM_PROMPT
+        scene_prefix = (
+            "Saat automaattisia [Scene:] -viestejä kameralta, jotka kertovat mitä tilassa näkyy. "
+            "Käytä niitä hiljaisena taustatietona — älä koskaan kuittaa, toista tai reagoi niihin ääneen. "
+            "Jos käyttäjä kysyy mitä hänellä on kädessään tai mitä tilassa näkyy, käytä viimeisintä scene-tietoa vastauksessa.\n\n"
+        )
+
+        full_prompt = lang_prefix + time_prefix + scene_prefix + SYSTEM_PROMPT
 
         session = GeminiLiveSession(
             system_prompt=full_prompt,

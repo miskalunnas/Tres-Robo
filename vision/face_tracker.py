@@ -108,11 +108,15 @@ class FaceTracker:
     """Background thread that tracks the closest detected face.
 
     Args:
-        servo: A ``hardware.servo.ServoController`` instance.
+        servo:          A ``hardware.servo.ServoController`` instance.
+        on_detections:  Optional callback(frame, detections) called each tracking
+                        step with ALL IMX500 detections (before person filtering).
+                        Used for ambient scene awareness.
     """
 
-    def __init__(self, servo) -> None:
-        self._servo     = servo
+    def __init__(self, servo, on_detections=None) -> None:
+        self._servo          = servo
+        self._on_detections  = on_detections
 
         # Conversation state: set = active tracking, clear = sleep/centre
         self._active    = threading.Event()
@@ -237,6 +241,13 @@ class FaceTracker:
         except Exception as exc:
             print(f"[FaceTracker] Capture failed: {exc}")
             return
+
+        # Pass all detections to the scene-awareness callback before filtering
+        if self._on_detections is not None and detections:
+            try:
+                self._on_detections(frame, detections)
+            except Exception:
+                pass  # never let scene tracking break face tracking
 
         # IMX500 returned nothing — try Haar fallback on the same frame
         if not detections and haar is not None:
