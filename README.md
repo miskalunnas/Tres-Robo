@@ -1,137 +1,165 @@
 # Tres-Robo
 
-Robot head project using a Raspberry Pi 5 with a wired microphone and local voice recognition.
+A Raspberry Pi-based humanoid robot assistant for the TRES startup community at Robolabs, Hervanta.
 
-## What this repo contains
+## Architecture
 
-- `main.py`: Python script that listens to the default microphone and prints recognized speech.
-- `requirements.txt`: Python dependencies for audio input and offline speech recognition.
+```
+OFFLINE  webrtcvad + Whisper (local, cheap)
+         → wake word detected ("hei bot", "founderbot", ...)
+ONLINE   Raw PCM audio streamed over WebSocket to Gemini Live
+         Gemini handles speech-to-text, reasoning, and text-to-speech in one model
+         Tool calls executed locally (music, vision, events, memory, Telegram...)
+         → inactivity timeout OR end_conversation tool → back OFFLINE
+```
 
-The code is written in **Python** and is intended to run on your **Raspberry Pi 5** (it will also run on your PC for testing, as long as you have a microphone).
+The entry point is `main_gemini.py`.
 
-## Setup on Raspberry Pi 5
+## Hardware
 
-1. **Update system packages**
+| Component | Details |
+|---|---|
+| Board | Raspberry Pi 5 |
+| Camera | Raspberry Pi AI Camera (IMX500, CSI) — falls back to Camera Module 2 or USB webcam |
+| Microphone | Wired USB mic (`MIC_DEVICE=hw:2,0` or index) |
+| Display | 800×480 HDMI screen (animated face) |
+| Servo head | Pan: GPIO 12, Tilt: GPIO 13 (SG90 via lgpio) |
+| Mute button | GPIO 17 (toggle mute) |
+| PTT button | GPIO 27 (push-to-talk, expo mode) |
 
-   ```bash
-   sudo apt update
-   sudo apt upgrade -y
-   ```
+## Setup
 
-2. **Install Python and audio tools**
+### 1. System packages
 
-   (Most Raspberry Pi OS images already have Python 3 installed.)
+```bash
+sudo apt update && sudo apt upgrade -y
+sudo apt install -y python3 python3-venv python3-pip portaudio19-dev ffmpeg
+# For Pi Camera:
+sudo apt install -y python3-picamera2 imx500-all
+# raspi-config → Interface Options → Camera (enable)
+```
 
-   ```bash
-   sudo apt install -y python3 python3-venv python3-pip portaudio19-dev
-   ```
+### 2. Clone and create virtualenv
 
-3. **Clone this repository onto your Pi**
+```bash
+git clone <repo-url> Tres-Robo
+cd Tres-Robo
+python3 -m venv venv
+source venv/bin/activate
+pip install --upgrade pip
+pip install -r requirements.txt
+```
 
-   ```bash
-   git clone <your-repo-url> tres-robo
-   cd tres-robo
-   ```
+### 3. Environment variables
 
-4. **Create and activate a virtual environment (recommended)**
+Copy `.env.example` to `.env` and fill in:
 
-   ```bash
-   python3 -m venv .venv
-   source .venv/bin/activate
-   ```
+```bash
+# Required
+GOOGLE_API_KEY=...          # Gemini Live API key
 
-5. **Install Python dependencies (Whisper, VAD, etc.)**
+# Optional overrides
+GEMINI_LIVE_MODEL=gemini-2.5-flash-native-audio-preview-12-2025
+GEMINI_VOICE=Charon
+GEMINI_TEMPERATURE=1.4
 
-   ```bash
-   pip install --upgrade pip
-   pip install -r requirements.txt
-   ```
+MIC_DEVICE=hw:2,0           # ALSA device string or PortAudio index
+MIC_CHANNELS=1
+MIC_SAMPLE_RATE=16000        # leave unset to auto-detect
 
-   The first time you run the script, the **Whisper "tiny" model** will be downloaded automatically. It is multilingual, but the code forces the language to **Finnish (`fi`)**.
+# Music (yt-dlp)
+YT_COOKIES_FILE=/path/to/cookies.txt   # YouTube Premium session (optional)
 
-## Running the voice recognition script
+# Luma calendar (TRES events)
+LUMA_API_KEY=...
+LUMA_CALENDAR_ID=cal-...    # optional, auto-discovered from lu.ma/tres
 
-1. Plug your **wired microphone** into the Raspberry Pi.
-2. Make sure you are in the project folder (and that your virtual environment is active if you created one).
-3. Run:
+# Telegram
+TELEGRAM_BOT_TOKEN=...
+TELEGRAM_CHAT_ID=...
+TELEGRAM_MESSAGE_THREAD_ID=...   # optional, for forum topics
 
-   ```bash
-   python3 main.py
-   ```
+# Expo push-to-talk (temporary)
+PTT_MODE=1                  # enable push-to-talk on GPIO 27
 
-You should see something like:
+# GPIO pins (defaults shown)
+MUTE_GPIO_PIN=17
+PTT_GPIO_PIN=27
+```
 
-- Information about the **input device** and sample rate.
-- A message that the **Whisper model** is loading.
-- A message that the robot is **OFFLINE** and waiting for the wake word "Hei botti".
-- As you speak, the audio is first filtered by **WebRTC VAD** (voice activity detection) to ignore pure background noise, then sent in small segments to Whisper.
-  - In OFFLINE mode, recognized speech segments are printed as: `[Offline heard] ...` and are only used to detect the wake word.
-  - When you say "Hei botti", the robot goes ONLINE.
-  - In ONLINE mode, segments are printed as: `You said: ...`
+### 4. Run
 
-### Music playback (Tools/music)
+```bash
+DISPLAY=:0 python main_gemini.py
+```
 
-- **Play, queue, skip, pause, resume, stop** are handled by the music tool (e.g. “play Beatles”, “next song”, “pause”).
-- Playback uses **yt-dlp** (pip) to resolve queries to audio URLs and **ffplay** (ffmpeg) or **mpv** to play them. Install at least one:
-  - **ffmpeg**: `sudo apt install ffmpeg` (provides `ffplay`)
-  - **mpv**: `sudo apt install mpv`
-- `requirements.txt` already includes `yt-dlp`. The bot will say “I couldn’t start playback.” if no player is found or the search fails.
+Say **"hei bot"**, **"founderbot"**, or any wake word to start a conversation.
 
-### TTS (puhesynteesi)
+---
 
-- **Oletus: Google Translate (gTTS)** — ilmainen, ei API-avainta. Asenna: `pip install gTTS`.
-- **ElevenLabs:** Aseta `.env`:ssä `TTS_PROVIDER=elevenlabs`, `ELEVENLABS_API_KEY` ja `ELEVENLABS_VOICE_ID`.
-- Toisto: mpg123, ffplay tai mpv (ensimmäinen löytyvä). Pi:llä `sudo apt install mpg123` tai `sudo apt install ffmpeg`.
+## Tools
 
-### Noise handling
+| Tool | What it does |
+|---|---|
+| `play_music` | Search and play music from YouTube by genre, artist, or song |
+| `music_skip` | Skip to the next track |
+| `music_pause` | Pause playback |
+| `music_resume` | Resume paused playback |
+| `music_stop` | Stop music and clear the queue |
+| `music_add_to_queue` | Add a song/artist to the playback queue |
+| `music_volume_up` | Increase volume |
+| `music_volume_down` | Decrease volume |
+| `get_events` | Fetch upcoming TRES events from the Luma calendar |
+| `get_event_details` | Fetch full details for a specific event (description, location, link) |
+| `get_menu` | Fetch today's lunch menus from Hervanta campus restaurants |
+| `see` | Take a photo and answer a visual question |
+| `lookup_knowledge` | Search local knowledge base for facts about TRES, people, slang |
+| `save_knowledge` | Silently save a new fact to long-term memory |
+| `telegram_send_message` | Stage a message to the TRES Telegram group (requires confirmation) |
+| `confirm_action` | Confirm or cancel a staged Telegram message |
+| `end_conversation` | End the session and go offline with a farewell |
 
-- The microphone stream is filtered by **WebRTC VAD** (`webrtcvad`), which tries to keep only speech and drop pure noise.
-- **Denoiser** (`noisereduce`) is enabled by default. With a 4-array mic that does on-device beamforming/NS, you can disable it: `USE_DENOISER=0` in `.env`.
+---
 
-### 4-array microphone
+## Memory
 
-For a 4-mic array (e.g. ReSpeaker), set in `.env`:
+Long-term memory is stored in a local SQLite vector database (`memory/`).
 
-- **MIC_DEVICE**: ALSA string (e.g. `hw:2,0`) or PortAudio device index (e.g. `2`). Find devices: `python -c "import sounddevice; print(sounddevice.query_devices())"` or `arecord -L`.
-- **MIC_CHANNELS**: `1` = single processed channel (default), `4` = raw 4-channel (mixed to mono).
-- **MIC_SAMPLE_RATE**: Device sample rate (e.g. `16000`). Leave unset to auto-detect; ReSpeaker 4-mic often needs 16 kHz.
-- **USE_DENOISER**: `0` or `false` if the array already does noise suppression.
+- **Knowledge files** — static facts in `data/knowledge/` (TRES info, personas, house people). Loaded and embedded on startup.
+- **Conversation facts** — the bot saves notable facts it hears via `save_knowledge`. A background curator (`memory/curator.py`) deduplicates and cleans these using GPT-4o-mini.
+- **Retrieval** — `lookup_knowledge` uses semantic search (embeddings) so meaning-based queries find relevant facts even without exact keyword matches.
 
-### Vision (see tool)
+---
 
-The bot can answer visual questions ("mitä näet?", "kuka siellä on?") using the camera.
+## Music playback
 
-- **Pi Camera Module 2 (CSI):** Preferred: `sudo apt install -y python3-picamera2`. Enable the camera in `raspi-config` → Interface Options → Camera.
-- **Pi Camera without picamera2:** If picamera2 is not installed, the code tries GStreamer+libcamera: `sudo apt install gstreamer1.0-libcamera gstreamer1.0-plugins-good`.
-- **USB webcam:** Falls back to OpenCV (indices 0, 1, 2). Set `CV2_CAMERA_INDEX=0` or `1` in `.env` if the default fails.
+Uses `yt-dlp` to resolve search queries to audio URLs, then plays via `mpv` (preferred, supports volume ducking during speech) or `ffplay`.
 
-Test the vision pipeline: `python -m vision.test_see_tool`
-  
-## Telegram (send message to group)
+```bash
+sudo apt install mpv       # recommended
+# or
+sudo apt install ffmpeg    # provides ffplay
+```
 
-Tres-Robo can send a message to a Telegram group via a Telegram bot, **but it always asks for voice confirmation first**.
+---
 
-1. Create or use an existing bot via BotFather.
-2. Copy `.env.example` → `.env` and set:
-   - `TELEGRAM_BOT_TOKEN`
-   - `TELEGRAM_CHAT_ID`
+## Vision
 
-### Finding `TELEGRAM_CHAT_ID`
+The camera priority order:
+1. **IMX500 AI Camera** — on-device EfficientDet person detection, used for face tracking
+2. **Standard picamera2** — Camera Module 2 or other CSI camera
+3. **OpenCV USB webcam** — dev fallback (`CV2_CAMERA_INDEX=0`)
 
-Simplest ways:
+The face tracker runs as a background thread and moves the pan/tilt servo head to follow the closest detected person. It automatically yields the camera to the `see` tool when needed.
 
-- Add your bot to the target group.
-- Send a message in the group, then call:
-  - `getUpdates`: `https://api.telegram.org/bot<YOUR_TOKEN>/getUpdates`
-  - Look for `"chat":{"id": ...}` in the JSON.
+---
 
-Notes:
-- Group chat ids are typically negative and may look like `-1001234567890`.
-- If you use Telegram “Topics”, you can optionally set `TELEGRAM_MESSAGE_THREAD_ID` to send into a specific topic.
+## Telegram
 
-## Next steps
+The bot can send messages to a Telegram group but **always reads the message aloud and asks for voice confirmation first**.
 
-- Connect the recognized text (e.g. "turn left", "look up", "blink") to **motor control** or other actions for your robot head.
-- Add a simple command parser in `main.py` that looks for certain keywords and triggers GPIO or serial commands to your robot hardware.
+1. Create a bot via [@BotFather](https://t.me/BotFather) and add it to your group.
+2. Set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in `.env`.
+3. To find the chat ID: send a message in the group, then call `https://api.telegram.org/bot<TOKEN>/getUpdates` and look for `"chat":{"id": ...}`.
 
-This repository is a starting point: it gives you working microphone input and speech-to-text so you can focus on the robot behavior.
+Group chat IDs are typically negative (e.g. `-1001234567890`).
