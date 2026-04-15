@@ -577,32 +577,6 @@ def listen_forever() -> None:
     else:
         print("[Mute] lgpio not available — mute button disabled.", file=sys.stderr)
 
-    # ── Camera stream (optional) ───────────────────────────────────────────────
-    if os.environ.get("CAMERA_STREAM", "").strip() == "1":
-        from vision.mjpeg_server import start as _start_stream
-        _start_stream()
-
-        # Idle streamer: push frames continuously when face tracker is inactive
-        # so the stream stays live between conversations.
-        def _idle_stream_loop():
-            from vision.camera import Camera
-            from vision import mjpeg_server
-            while True:
-                if _face_tracker is not None and _face_tracker._active.is_set():
-                    # Face tracker is active and pushing its own frames — stand down.
-                    time.sleep(0.5)
-                    continue
-                try:
-                    with Camera(warmup_seconds=0.3) as cam:
-                        while not (_face_tracker is not None and _face_tracker._active.is_set()):
-                            frame = cam.capture()
-                            mjpeg_server.push_frame(frame)
-                            time.sleep(0.2)  # ~5 FPS idle preview
-                except Exception:
-                    time.sleep(2.0)
-
-        threading.Thread(target=_idle_stream_loop, daemon=True, name="idle-stream").start()
-
     # ── Head tracking ──────────────────────────────────────────────────────────
     if _head_enabled:
         _face_tracker.start()

@@ -40,8 +40,6 @@ import threading
 import time
 from contextlib import contextmanager
 
-from vision import mjpeg_server
-
 logger = logging.getLogger(__name__)
 
 # ── Tracking parameters ───────────────────────────────────────────────────────
@@ -239,8 +237,6 @@ class FaceTracker:
         except Exception as exc:
             print(f"[FaceTracker] Capture failed: {exc}")
             return
-
-        mjpeg_server.push_frame(frame)
 
         # IMX500 returned nothing — try Haar fallback on the same frame
         if not detections and haar is not None:
