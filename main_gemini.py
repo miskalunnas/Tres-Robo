@@ -564,6 +564,20 @@ def _strip_wake_word(text: str, wake_word: str) -> str:
 
 # ── Device resolution ──────────────────────────────────────────────────────────
 
+def _resolve_device_channels(device, sample_rate: int) -> int:
+    """Return a working channel count for the device, falling back if configured value fails."""
+    configured = int(os.environ.get("MIC_CHANNELS", "1"))
+    for ch in [configured] + [c for c in (1, 2) if c != configured]:
+        try:
+            sd.check_input_settings(device=device, channels=ch, samplerate=sample_rate)
+            if ch != configured:
+                print(f"[Mic] MIC_CHANNELS={configured} not supported by device — using {ch}")
+            return ch
+        except sd.PortAudioError:
+            continue
+    return configured  # return original and let the stream open fail with a clear error
+
+
 def _resolve_device_sample_rate(device, channels: int) -> int:
     _sr = os.environ.get("MIC_SAMPLE_RATE", "").strip()
     if _sr.isdigit():
@@ -592,9 +606,8 @@ def listen_forever() -> None:
     _default_dev = "" if sys.platform == "win32" else "hw:2,0"
     _dev = os.environ.get("MIC_DEVICE", _default_dev).strip()
     MIC_DEVICE = int(_dev) if _dev.isdigit() else (_dev if _dev else None)
-    MIC_CHANNELS = int(os.environ.get("MIC_CHANNELS", "1"))
-
-    native_sr = _resolve_device_sample_rate(MIC_DEVICE, MIC_CHANNELS)
+    native_sr = _resolve_device_sample_rate(MIC_DEVICE, int(os.environ.get("MIC_CHANNELS", "1")))
+    MIC_CHANNELS = _resolve_device_channels(MIC_DEVICE, native_sr)
     capture_block = int(native_sr * VAD_FRAME_DURATION_MS / 1000)
     frame_seconds = VAD_FRAME_DURATION_MS / 1000.0
     vad_frame_len = int(VAD_SAMPLE_RATE * VAD_FRAME_DURATION_MS / 1000)
