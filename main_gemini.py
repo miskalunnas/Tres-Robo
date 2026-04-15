@@ -28,6 +28,12 @@ load_dotenv()
 import numpy as np
 
 try:
+    import pygame  # noqa: F401 — pre-import in main thread to prevent import deadlock in face-display thread
+    del pygame
+except ImportError:
+    pass
+
+try:
     from face.display import FaceState, start_display, stop_display, set_state as face_set
     _face_enabled = True
 except Exception as _face_err:
