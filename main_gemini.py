@@ -660,7 +660,19 @@ def listen_forever() -> None:
 
         # Language override — native audio models need this prominent.
         lang_prefix = "CRITICAL: Always reply in the same language the user just spoke. English input → English reply. Finnish input → Finnish reply. Never switch language mid-response.\n\n"
-        full_prompt = lang_prefix + SYSTEM_PROMPT
+
+        # Inject current Helsinki time so the bot always knows the correct local time.
+        from datetime import datetime
+        try:
+            from zoneinfo import ZoneInfo
+            _tz = ZoneInfo("Europe/Helsinki")
+        except ImportError:
+            from datetime import timezone, timedelta
+            _tz = timezone(timedelta(hours=3))
+        _now = datetime.now(_tz)
+        time_prefix = f"Tämänhetkinen aika: {_now.strftime('%A %d.%m.%Y klo %H:%M')} (Helsinki). Käytä tätä vastauksissa kun käyttäjä kysyy aikaa tai päivämäärää.\n\n"
+
+        full_prompt = lang_prefix + time_prefix + SYSTEM_PROMPT
 
         session = GeminiLiveSession(
             system_prompt=full_prompt,
