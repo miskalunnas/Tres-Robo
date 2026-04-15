@@ -109,6 +109,28 @@ class GeminiLiveSession:
         if self._loop and self._text_queue and not self._closed:
             self._loop.call_soon_threadsafe(self._text_queue.put_nowait, text)
 
+    def send_activity_end(self) -> None:
+        """Thread-safe: signal to Gemini that the user stopped speaking (PTT button released).
+        Bypasses server VAD so Gemini responds immediately instead of waiting for silence."""
+        if self._loop and not self._closed:
+            self._loop.call_soon_threadsafe(self._schedule_activity_end)
+
+    def _schedule_activity_end(self) -> None:
+        if self._loop and not self._closed:
+            asyncio.ensure_future(self._send_activity_end_async(), loop=self._loop)
+
+    async def _send_activity_end_async(self) -> None:
+        session = self._live_session
+        if session is None:
+            return
+        try:
+            from google.genai import types as _t
+            await session.send_realtime_input(activity_end=_t.ActivityEnd())
+            print("[Gemini] PTT end-of-turn sent")
+        except Exception as exc:
+            if not self._closed:
+                print(f"[Gemini] Activity end error: {exc}")
+
     def send_image(self, jpeg_bytes: bytes) -> None:
         """Thread-safe: inject a JPEG frame into the live session as realtime input."""
         if self._loop and self._audio_queue and not self._closed:

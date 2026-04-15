@@ -565,7 +565,13 @@ def listen_forever() -> None:
                     else:
                         _ptt_held.clear()
                     if ptt_val != ptt_prev:
-                        print("[PTT] Held" if ptt_val == 0 else "[PTT] Released")
+                        if ptt_val == 0:
+                            print("[PTT] Held")
+                        else:
+                            print("[PTT] Released — signalling end of turn")
+                            sess = _current_session
+                            if sess is not None:
+                                sess.send_activity_end()
                     ptt_prev = ptt_val
 
                 time.sleep(0.02)  # 20 ms poll interval
