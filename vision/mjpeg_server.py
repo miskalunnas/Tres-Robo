@@ -72,7 +72,7 @@ _INDEX = b"""\
   </style>
 </head>
 <body>
-  <h2>Tres-Robo \u2014 Live Camera</h2>
+  <h2>Tres-Robo &#8212; Live Camera</h2>
   <img src="/stream" alt="Camera stream">
 </body>
 </html>
