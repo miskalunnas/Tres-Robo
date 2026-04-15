@@ -17,6 +17,7 @@ Then open on your laptop:
 
 import io
 import os
+import sys
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
@@ -136,8 +137,15 @@ def start(port: int = STREAM_PORT) -> None:
     _started = True
 
     def _serve():
-        server = HTTPServer(("0.0.0.0", port), _Handler)
-        print(f"[Stream] MJPEG server started — open http://<pi-ip>:{port} on your laptop")
-        server.serve_forever()
+        try:
+            server = HTTPServer(("0.0.0.0", port), _Handler)
+        except OSError as exc:
+            print(f"[Stream] Failed to bind port {port}: {exc}", file=sys.stderr)
+            return
+        print(f"[Stream] MJPEG server listening on 0.0.0.0:{port}")
+        try:
+            server.serve_forever()
+        except Exception as exc:
+            print(f"[Stream] Server crashed: {exc}", file=sys.stderr)
 
     threading.Thread(target=_serve, daemon=True, name="mjpeg-server").start()
